@@ -29,3 +29,10 @@ logging:
 checkpoint:
   save_dir: "checkpoints"
   resume_from: null
+
+environment:
+  lean_version: "v4.27.0-rc1"  # Lean 4 version
+  mathlib_version: null  # Use latest mathlib, or specify version
+  timeout: 30  # Timeout in seconds per tactic
+  verbose: false  # Enable verbose Lean server logging
+  auto_recover: true  # Auto-restart server on crashes
