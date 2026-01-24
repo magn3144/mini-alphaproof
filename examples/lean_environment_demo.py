@@ -112,47 +112,10 @@ def demo_error_handling():
     env.close()
 
 
-def demo_backtracking():
-    """Demonstrate backtracking functionality."""
-    print("\n\n" + "=" * 70)
-    print("DEMO 4: Backtracking")
-    print("=" * 70)
-
-    env = Lean4Environment(
-        "theorem ex : ∀ n : Nat, n = n := by sorry",
-        verbose=False
-    )
-
-    print("\n1. Initial state:")
-    print(env.get_state_string())
-
-    print("\n2. Applying tactics: 'intro n', 'intro m' (wrong)")
-    env.apply_tactic("intro n")
-    print(f"   After 'intro n': {env.current_state.num_goals()} goals")
-
-    # Try wrong tactic
-    result = env.step("intro m")
-    if not result.success:
-        print(f"   'intro m' failed (expected)")
-
-    print("\n3. Applying correct tactic: 'rfl'")
-    result = env.step("rfl")
-
-    if result.success and result.proof_complete:
-        print("   ✓ Proof complete!")
-
-    print("\n4. Final statistics:")
-    stats = env.get_stats()
-    print(f"   Total steps: {stats['steps_taken']}")
-    print(f"   Tactics used: {', '.join(stats['tactics_applied'])}")
-
-    env.close()
-
-
 def demo_different_formats():
     """Demonstrate different output formats."""
     print("\n\n" + "=" * 70)
-    print("DEMO 5: Output Formats")
+    print("DEMO 4: Output Formats")
     print("=" * 70)
 
     env = Lean4Environment(
@@ -185,7 +148,6 @@ def main():
         demo_basic_usage()
         demo_interactive_proof()
         demo_error_handling()
-        demo_backtracking()
         demo_different_formats()
 
         print("\n\n" + "=" * 70)

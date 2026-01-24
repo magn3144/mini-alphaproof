@@ -24,7 +24,6 @@ def print_help():
     print("  <tactic>        - Apply a tactic (e.g., 'intro n', 'norm_num')")
     print("  state           - Show current proof state")
     print("  stats           - Show proof statistics")
-    print("  back [n]        - Backtrack n steps (default: 1)")
     print("  reset [theorem] - Reset with new theorem (or restart current)")
     print("  help            - Show this help message")
     print("  quit            - Exit the interactive session")
@@ -77,7 +76,6 @@ def main():
             if env.is_complete():
                 print("\n🎉 PROOF COMPLETE! 🎉")
                 print(f"Completed in {env.steps_taken} steps")
-                print(f"Tactics used: {', '.join(env.tactics_applied)}")
 
                 response = input("\nReset to try again? (y/n): ").strip().lower()
                 if response == 'y':
@@ -120,25 +118,6 @@ def main():
                 print(f"  Steps taken: {stats['steps_taken']}")
                 print(f"  Goals remaining: {stats['num_goals']}")
                 print(f"  Proof complete: {stats['proof_complete']}")
-                print(f"  History length: {stats['history_length']}")
-                if stats['tactics_applied']:
-                    print(f"  Tactics applied: {', '.join(stats['tactics_applied'])}")
-
-            elif command == "back":
-                steps = 1
-                if args:
-                    try:
-                        steps = int(args)
-                    except ValueError:
-                        print(f"Invalid number: {args}")
-                        continue
-
-                try:
-                    env.backtrack(steps)
-                    print(f"Backtracked {steps} step(s)")
-                    print(env.render())
-                except ValueError as e:
-                    print(f"Error: {e}")
 
             elif command == "reset":
                 new_theorem = args if args else None

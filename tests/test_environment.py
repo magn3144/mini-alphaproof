@@ -85,29 +85,6 @@ class TestLean4Environment:
         with pytest.raises(TheoremSyntaxException):
             env = Lean4Environment("this is not a valid theorem")
 
-    def test_backtracking(self):
-        """Test backtracking functionality."""
-        env = Lean4Environment("theorem ex5 : ∀ n : Nat, n = n := by sorry")
-
-        # Apply intro
-        env.apply_tactic("intro n")
-        assert env.steps_taken == 1
-
-        # Apply another intro (should fail, but let's try)
-        env.apply_tactic("rfl")
-        assert env.steps_taken == 2
-
-        # Backtrack one step
-        state = env.backtrack(1)
-        assert env.steps_taken == 1
-        assert state.num_goals() == 1
-
-        # Backtrack to beginning
-        state = env.backtrack(1)
-        assert env.steps_taken == 0
-
-        env.close()
-
     def test_reset(self):
         """Test environment reset."""
         env = Lean4Environment("theorem ex6 : True := by sorry")
@@ -120,7 +97,6 @@ class TestLean4Environment:
         env.reset()
         assert not env.is_complete()
         assert env.steps_taken == 0
-        assert len(env.tactics_applied) == 0
 
         env.close()
 
@@ -134,8 +110,6 @@ class TestLean4Environment:
         # Check stats
         stats = env.get_stats()
         assert stats["steps_taken"] == 1
-        assert len(stats["tactics_applied"]) == 1
-        assert stats["tactics_applied"][0] == "rfl"
         assert stats["proof_complete"] == True
 
         env.close()

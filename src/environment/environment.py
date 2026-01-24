@@ -1,7 +1,7 @@
 """
 Main Lean 4 environment class for interactive theorem proving.
 """
-from typing import Optional, List, Tuple
+from typing import Optional
 import logging
 
 from .lean_interface import LeanInterface
@@ -57,14 +57,9 @@ class Lean4Environment:
 
         # State management
         self.current_state: Optional[ProofState] = None
-        self.initial_theorem: str = theorem_statement
-
-        # History stack for backtracking: (tactic, proof_state_id, state)
-        self.history: List[Tuple[str, Optional[int], ProofState]] = []
 
         # Statistics
         self.steps_taken: int = 0
-        self.tactics_applied: List[str] = []
 
         # Initialize the theorem
         self.reset(theorem_statement)
@@ -89,9 +84,7 @@ class Lean4Environment:
 
         # Clear state
         self.current_state = None
-        self.history = []
         self.steps_taken = 0
-        self.tactics_applied = []
 
         # Initialize the theorem with Lean
         try:
@@ -137,13 +130,6 @@ class Lean4Environment:
             )
 
         try:
-            # Save current state to history
-            self.history.append((
-                tactic,
-                self.current_state.proof_state_id,
-                self.current_state
-            ))
-
             # Execute the tactic
             logger.debug(f"Applying tactic: {tactic}")
             response = self.interface.execute_tactic(
@@ -156,7 +142,6 @@ class Lean4Environment:
 
             # Update statistics
             self.steps_taken += 1
-            self.tactics_applied.append(tactic)
             self.current_state = new_state
 
             # Check if proof is complete
@@ -176,10 +161,6 @@ class Lean4Environment:
             # Tactic failed, but we can continue
             logger.warning(f"Tactic failed: {e.error_message}")
 
-            # Remove the failed attempt from history
-            if self.history and self.history[-1][0] == tactic:
-                self.history.pop()
-
             return TacticResult(
                 success=False,
                 new_state=self.current_state,
@@ -190,10 +171,6 @@ class Lean4Environment:
         except Lean4Exception as e:
             # More serious error
             logger.error(f"Lean error: {e}")
-
-            # Remove the failed attempt from history
-            if self.history and self.history[-1][0] == tactic:
-                self.history.pop()
 
             return TacticResult(
                 success=False,
@@ -302,44 +279,6 @@ class Lean4Environment:
 
         return result
 
-    def backtrack(self, steps: int = 1) -> ProofState:
-        """
-        Undo previous tactics.
-
-        Args:
-            steps: Number of steps to backtrack (default: 1)
-
-        Returns:
-            Proof state after backtracking
-
-        Raises:
-            ValueError: If trying to backtrack more steps than available
-
-        Example:
-            >>> env.apply_tactic("intro")  # Wrong tactic
-            >>> env.backtrack()  # Undo it
-            >>> env.apply_tactic("trivial")  # Try correct tactic
-        """
-        if steps <= 0:
-            raise ValueError("Steps must be positive")
-
-        if steps > len(self.history):
-            raise ValueError(
-                f"Cannot backtrack {steps} steps, only {len(self.history)} available"
-            )
-
-        # Remove the last 'steps' entries from history
-        for _ in range(steps):
-            if self.history:
-                tactic, proof_state_id, state = self.history.pop()
-                self.current_state = state
-                self.steps_taken -= 1
-                if self.tactics_applied:
-                    self.tactics_applied.pop()
-
-        logger.info(f"Backtracked {steps} steps")
-        return self.current_state
-
     def _extract_theorem_name(self) -> Optional[str]:
         """Extract the theorem name from the theorem statement."""
         try:
@@ -364,10 +303,8 @@ class Lean4Environment:
         """
         return {
             "steps_taken": self.steps_taken,
-            "tactics_applied": self.tactics_applied.copy(),
             "num_goals": self.current_state.num_goals() if self.current_state else 0,
-            "proof_complete": self.is_complete(),
-            "history_length": len(self.history)
+            "proof_complete": self.is_complete()
         }
 
     def close(self):
@@ -380,7 +317,6 @@ class Lean4Environment:
         if self.interface:
             self.interface.shutdown()
         self.current_state = None
-        self.history = []
 
     def __enter__(self):
         """Context manager entry."""
