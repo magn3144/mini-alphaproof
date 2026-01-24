@@ -13,7 +13,9 @@
       "Bash(export PATH=\"$HOME/.elan/bin:$PATH\")",
       "Bash(ls:*)",
       "Bash(echo:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(xargs cat:*)",
+      "Bash(wc:*)"
     ]
   }
 }
