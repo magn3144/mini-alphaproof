@@ -43,7 +43,6 @@ class Lean4Environment:
             >>> env.apply_tactic("norm_num")
             >>> print(env.is_complete())
         """
-        self.theorem_statement = theorem_statement
         self.lean_version = lean_version
         self.timeout = timeout
         self.verbose = verbose
@@ -61,38 +60,14 @@ class Lean4Environment:
         # Statistics
         self.steps_taken: int = 0
 
-        # Initialize the theorem
-        self.reset(theorem_statement)
-
-    def reset(self, theorem_statement: Optional[str] = None) -> ProofState:
-        """
-        Reset the environment to a new theorem or the initial theorem.
-
-        Args:
-            theorem_statement: New theorem statement, or None to reset to initial
-
-        Returns:
-            Initial proof state
-
-        Raises:
-            TheoremSyntaxException: If theorem syntax is invalid
-        """
-        if theorem_statement is not None:
-            self.theorem_statement = theorem_statement
-
-        logger.info(f"Resetting environment with theorem: {self.theorem_statement}")
-
-        # Clear state
-        self.current_state = None
-        self.steps_taken = 0
-
         # Initialize the theorem with Lean
+        logger.info(f"Initializing environment with theorem: {theorem_statement}")
+
         try:
-            self.current_state = self.interface.initialize_theorem(self.theorem_statement)
+            self.current_state = self.interface.initialize_theorem(theorem_statement)
             logger.info(f"Initial state has {self.current_state.num_goals()} goals")
-            return self.current_state
         except Exception as e:
-            logger.error(f"Failed to reset environment: {e}")
+            logger.error(f"Failed to initialize environment: {e}")
             raise
 
     def step(self, tactic: str) -> TacticResult:
@@ -257,42 +232,14 @@ class Lean4Environment:
         if self.current_state is None:
             return "No proof state initialized"
 
-        output_lines = []
-
-        # Add theorem name if we can extract it
-        theorem_name = self._extract_theorem_name()
-        if theorem_name:
-            output_lines.append(f"Theorem: {theorem_name}")
-
-        # Add statistics
-        output_lines.append(f"Steps taken: {self.steps_taken}")
-
-        # Add current state
-        output_lines.append("")
-        output_lines.append(self.current_state.to_string(format=mode))
-
-        result = "\n".join(output_lines)
+        # Get current state
+        result = self.current_state.to_string(format=mode)
 
         # Apply colors if in human mode
         if mode == "human":
             result = format_state_with_colors(result, use_color=use_color)
 
         return result
-
-    def _extract_theorem_name(self) -> Optional[str]:
-        """Extract the theorem name from the theorem statement."""
-        try:
-            # Simple parsing: "theorem name : ..." -> "name"
-            if "theorem" in self.theorem_statement:
-                parts = self.theorem_statement.split()
-                theorem_idx = parts.index("theorem")
-                if theorem_idx + 1 < len(parts):
-                    name = parts[theorem_idx + 1]
-                    # Remove any trailing colon
-                    return name.rstrip(":")
-        except Exception:
-            pass
-        return None
 
     def get_stats(self) -> dict:
         """

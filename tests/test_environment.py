@@ -85,21 +85,6 @@ class TestLean4Environment:
         with pytest.raises(TheoremSyntaxException):
             env = Lean4Environment("this is not a valid theorem")
 
-    def test_reset(self):
-        """Test environment reset."""
-        env = Lean4Environment("theorem ex6 : True := by sorry")
-
-        # Apply tactic
-        env.apply_tactic("trivial")
-        assert env.is_complete()
-
-        # Reset
-        env.reset()
-        assert not env.is_complete()
-        assert env.steps_taken == 0
-
-        env.close()
-
     def test_statistics(self):
         """Test statistics tracking."""
         env = Lean4Environment("theorem ex7 : ∀ n : Nat, n = n := by intro n; sorry")

@@ -24,7 +24,7 @@ def print_help():
     print("  <tactic>        - Apply a tactic (e.g., 'intro n', 'norm_num')")
     print("  state           - Show current proof state")
     print("  stats           - Show proof statistics")
-    print("  reset [theorem] - Reset with new theorem (or restart current)")
+    print("  mode [format]   - Switch display mode: human (default), llm, or json")
     print("  help            - Show this help message")
     print("  quit            - Exit the interactive session")
 
@@ -62,8 +62,12 @@ def main():
         return 1
 
     print_divider()
-    print("Initial proof state:")
-    print(env.render())
+
+    # Display mode setting
+    display_mode = "human"  # Options: "human", "llm", "json"
+    print(f"Display mode: {display_mode}")
+    print("\nInitial proof state:")
+    print(env.render(mode=display_mode))
     print_divider()
 
     print_help()
@@ -76,17 +80,8 @@ def main():
             if env.is_complete():
                 print("\n🎉 PROOF COMPLETE! 🎉")
                 print(f"Completed in {env.steps_taken} steps")
-
-                response = input("\nReset to try again? (y/n): ").strip().lower()
-                if response == 'y':
-                    env.reset()
-                    print_divider()
-                    print("Environment reset!")
-                    print(env.render())
-                    print_divider()
-                    continue
-                else:
-                    break
+                print("\nRestart the script to try another theorem.")
+                break
 
             # Get user input
             user_input = input("\n> ").strip()
@@ -110,7 +105,25 @@ def main():
                 print_help()
 
             elif command == "state":
-                print(env.render())
+                print(f"Display mode: {display_mode}")
+                print(env.render(mode=display_mode))
+
+            elif command == "mode":
+                if args and args.lower() in ["human", "llm", "json"]:
+                    display_mode = args.lower()
+                    print(f"✓ Display mode set to: {display_mode}")
+                    print("\nCurrent proof state:")
+                    print(env.render(mode=display_mode))
+                elif args:
+                    print(f"✗ Invalid mode: {args}")
+                    print("Valid modes: human, llm, json")
+                else:
+                    print(f"Current display mode: {display_mode}")
+                    print("Available modes: human, llm, json")
+                    print("\nExamples:")
+                    print("  mode llm   - Switch to LLM-friendly format")
+                    print("  mode human - Switch to human-readable format")
+                    print("  mode json  - Switch to JSON format")
 
             elif command == "stats":
                 stats = env.get_stats()
@@ -118,15 +131,6 @@ def main():
                 print(f"  Steps taken: {stats['steps_taken']}")
                 print(f"  Goals remaining: {stats['num_goals']}")
                 print(f"  Proof complete: {stats['proof_complete']}")
-
-            elif command == "reset":
-                new_theorem = args if args else None
-                try:
-                    env.reset(new_theorem)
-                    print("Environment reset!")
-                    print(env.render())
-                except Exception as e:
-                    print(f"Error resetting: {e}")
 
             else:
                 # Treat as a tactic
@@ -136,7 +140,7 @@ def main():
                 if result.success:
                     print(f"✓ Tactic '{tactic}' succeeded")
                     print_divider()
-                    print(env.render())
+                    print(env.render(mode=display_mode))
                 else:
                     print(f"✗ Tactic '{tactic}' failed")
                     if result.error_message:
