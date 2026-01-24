@@ -388,6 +388,7 @@ class Lean4Environment:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
+        del exc_type, exc_val, exc_tb  # Unused
         self.close()
         return False
 

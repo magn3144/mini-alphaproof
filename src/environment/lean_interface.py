@@ -2,11 +2,12 @@
 Low-level interface for communicating with the Lean 4 server.
 Wraps the LeanInteract library for server management.
 """
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import logging
 
 try:
-    from lean_interact import LeanProject, AutoLeanServer
+    from lean_interact import AutoLeanServer, LeanREPLConfig
+    from lean_interact.interface import Command, ProofStep, ProofStepResponse, LeanError
 except ImportError:
     raise ImportError(
         "lean-interact is required for Lean 4 support. "
@@ -63,15 +64,17 @@ class LeanInterface:
     def _initialize_server(self):
         """Initialize the Lean server with auto-recovery."""
         try:
-            # Create a Lean project
-            # LeanInteract handles project setup automatically
+            # Create a Lean REPL configuration
             logger.info(f"Initializing Lean server with version {self.lean_version}")
 
-            # AutoLeanServer handles crash recovery automatically
-            self.server = AutoLeanServer(
+            # Create config with the specified Lean version
+            config = LeanREPLConfig(
                 lean_version=self.lean_version,
                 verbose=self.verbose
             )
+
+            # AutoLeanServer handles crash recovery automatically
+            self.server = AutoLeanServer(config=config)
 
             logger.info("Lean server initialized successfully")
 
@@ -100,21 +103,58 @@ class LeanInterface:
             # The theorem should be in the form: "theorem name : statement := by sorry"
             logger.debug(f"Initializing theorem: {theorem}")
 
-            # Send the theorem to Lean
-            response = self.server.run_code(theorem)
+            # Send the theorem to Lean using Command
+            response = self.server.run(Command(cmd=theorem, rootGoals=True))
 
-            # Check for errors
-            if response.get("error"):
-                error_msg = response.get("error", "Unknown error")
-                raise TheoremSyntaxException(theorem, error_msg)
+            # Check if response is an error
+            if isinstance(response, LeanError):
+                raise TheoremSyntaxException(theorem, response.message)
 
-            # Extract the initial proof state
+            # Extract the initial proof state from sorries
             # LeanInteract returns the proof state when encountering a sorry
-            proof_state = self._parse_proof_state(response)
+            if not response.sorries:
+                raise TheoremSyntaxException(
+                    theorem,
+                    "No 'sorry' found in theorem. Theorem must contain 'sorry' to create initial proof state."
+                )
 
-            # Store environment ID if available
-            if "env_id" in response:
-                self._current_env_id = response["env_id"]
+            # Use the first sorry's proof state
+            first_sorry = response.sorries[0]
+
+            # Parse the goal string to extract hypotheses and target
+            goal_str = first_sorry.goal
+            hypotheses = []
+            target = goal_str
+
+            # Split by turnstile to separate hypotheses from target
+            if '⊢' in goal_str:
+                parts = goal_str.split('⊢')
+                if len(parts) == 2:
+                    hyp_part = parts[0].strip()
+                    target = parts[1].strip()
+
+                    # Parse hypotheses (each on a separate line)
+                    if hyp_part:
+                        hypotheses = [
+                            line.strip()
+                            for line in hyp_part.split('\n')
+                            if line.strip()
+                        ]
+
+            proof_state = ProofState(
+                goals=[Goal(
+                    id=1,
+                    hypotheses=hypotheses,
+                    target=target
+                )],
+                env_id=response.env,
+                proof_state_id=first_sorry.proof_state,
+                messages=[],
+                errors=[]
+            )
+
+            # Store environment ID
+            self._current_env_id = response.env
 
             return proof_state
 
@@ -146,27 +186,30 @@ class LeanInterface:
         if self.server is None:
             raise ServerCrashException("Server not initialized")
 
+        if proof_state_id is None:
+            raise TacticFailedException(tactic, "No proof_state_id provided")
+
         try:
             logger.debug(f"Executing tactic: {tactic}")
 
-            # Execute the tactic
-            # LeanInteract handles tactic execution through run_tactic
-            response = self.server.run_tactic(
-                tactic=tactic,
-                proof_state_id=proof_state_id,
+            # Execute the tactic using ProofStep
+            response = self.server.run(
+                ProofStep(tactic=tactic, proofState=proof_state_id),
                 timeout=self.timeout
             )
 
-            # Check for timeout
-            if response.get("timeout"):
-                raise TimeoutException(tactic, self.timeout)
+            # Check if response is an error
+            if isinstance(response, LeanError):
+                raise TacticFailedException(tactic, response.message)
 
-            # Check for errors
-            if response.get("error"):
-                error_msg = response.get("error", "Unknown error")
-                raise TacticFailedException(tactic, error_msg)
+            # Convert ProofStepResponse to dictionary format
+            result = {
+                "goals": response.goals,
+                "proof_state_id": response.proof_state,
+                "error": None
+            }
 
-            return response
+            return result
 
         except (TacticFailedException, TimeoutException):
             raise
@@ -179,30 +222,55 @@ class LeanInterface:
         Parse a Lean response into a ProofState object.
 
         Args:
-            response: Response dictionary from Lean
+            response: Response dictionary from Lean (from execute_tactic)
 
         Returns:
             Parsed ProofState object
         """
-        goals = []
+        goals_list = []
         messages = []
         errors = []
 
         # Extract goals from response
+        # The response["goals"] is a list of goal strings from lean-interact
+        # Each goal string has the format:
+        #   hypothesis1
+        #   hypothesis2
+        #   ...
+        #   ⊢ target
         if "goals" in response and response["goals"]:
             for i, goal_data in enumerate(response["goals"]):
-                # Parse goal structure
-                hypotheses = goal_data.get("hypotheses", [])
-                target = goal_data.get("target", goal_data.get("conclusion", ""))
+                # goal_data is typically a string
+                if isinstance(goal_data, str):
+                    # Split by the turnstile symbol
+                    parts = goal_data.split('⊢')
+                    if len(parts) == 2:
+                        # We have hypotheses and target
+                        hyp_part = parts[0].strip()
+                        target = parts[1].strip()
 
-                # Format hypotheses
-                formatted_hyps = []
-                if isinstance(hypotheses, list):
-                    formatted_hyps = [str(h) for h in hypotheses]
-                elif isinstance(hypotheses, str):
-                    formatted_hyps = [hypotheses]
+                        # Parse hypotheses (each on a separate line)
+                        formatted_hyps = []
+                        if hyp_part:
+                            # Split by newlines and filter out empty lines
+                            formatted_hyps = [
+                                line.strip()
+                                for line in hyp_part.split('\n')
+                                if line.strip()
+                            ]
+                    else:
+                        # No turnstile, the whole thing is the target
+                        formatted_hyps = []
+                        target = goal_data.strip()
+                        # Add turnstile if missing
+                        if not target.startswith('⊢'):
+                            target = f'⊢ {target}'
+                else:
+                    # Fallback for unexpected format
+                    formatted_hyps = []
+                    target = str(goal_data)
 
-                goals.append(Goal(
+                goals_list.append(Goal(
                     id=i + 1,
                     hypotheses=formatted_hyps,
                     target=target
@@ -220,7 +288,7 @@ class LeanInterface:
 
         # Create proof state
         proof_state = ProofState(
-            goals=goals,
+            goals=goals_list,
             env_id=response.get("env_id"),
             proof_state_id=response.get("proof_state_id"),
             messages=messages,
@@ -235,7 +303,7 @@ class LeanInterface:
             logger.info("Shutting down Lean server")
             try:
                 # LeanInteract's AutoLeanServer cleanup
-                self.server.close()
+                self.server.kill()
             except Exception as e:
                 logger.warning(f"Error during server shutdown: {e}")
             finally:
@@ -248,5 +316,6 @@ class LeanInterface:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
+        del exc_type, exc_val, exc_tb  # Unused
         self.shutdown()
         return False

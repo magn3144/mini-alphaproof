@@ -30,7 +30,11 @@ class Goal:
                 for hyp in self.hypotheses:
                     lines.append(f"    {hyp}")
             lines.append("  Target:")
-            lines.append(f"    ⊢ {self.target}")
+            # Only add turnstile if not already present
+            if self.target.strip().startswith("⊢"):
+                lines.append(f"    {self.target}")
+            else:
+                lines.append(f"    ⊢ {self.target}")
             return "\n".join(lines)
         elif format == "llm":
             parts = []

@@ -5,7 +5,14 @@
       "Bash(find:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:leandojo.readthedocs.io)"
+      "WebFetch(domain:leandojo.readthedocs.io)",
+      "Bash(python test_lean_environment.py:*)",
+      "Bash(python3:*)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(export PATH=\"$HOME/.elan/bin:$PATH\")",
+      "Bash(ls:*)",
+      "Bash(echo:*)"
     ]
   }
 }
