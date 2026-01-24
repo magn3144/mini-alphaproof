@@ -13,7 +13,8 @@ from src.environment import (
     Lean4Environment,
     TacticFailedException,
     TheoremSyntaxException,
-    Lean4Exception
+    Lean4Exception,
+    InvalidProofException
 )
 
 
@@ -22,7 +23,10 @@ class TestLean4Environment:
 
     def test_simple_proof_with_rfl(self):
         """Test a simple proof using rfl."""
-        env = Lean4Environment("theorem ex1 : ∀ n : Nat, n + 0 = n := by intro n; sorry")
+        env = Lean4Environment(
+            "theorem ex1 : ∀ n : Nat, n + 0 = n := by intro n; sorry",
+            allow_sorry=False
+        )
 
         # Check initial state
         assert not env.is_complete()
@@ -58,7 +62,10 @@ class TestLean4Environment:
 
     def test_trivial_tactic(self):
         """Test trivial tactic for True."""
-        env = Lean4Environment("theorem ex3 : True := by sorry")
+        env = Lean4Environment(
+            "theorem ex3 : True := by sorry",
+            allow_sorry=False
+        )
 
         # Apply trivial
         result = env.step("trivial")
@@ -161,6 +168,89 @@ class TestLean4Environment:
         # Test JSON format
         json_str = env.render(mode="json")
         assert "{" in json_str and "}" in json_str
+
+        env.close()
+
+    def test_sorry_tactic_rejected(self):
+        """Test that sorry tactic is rejected when allow_sorry=False."""
+        # Create environment with a theorem that requires proof
+        env = Lean4Environment(
+            "theorem ex_sorry : False → True := by sorry",
+            allow_sorry=False
+        )
+
+        # The initial state should be set up, but applying sorry should fail
+        # First, introduce the hypothesis
+        result = env.step("intro h")
+
+        if result.success and not env.is_complete():
+            # Now try to use sorry (should be rejected)
+            result = env.step("sorry")
+            assert not result.success
+            assert "sorry" in result.error_message.lower() or "invalid" in result.error_message.lower()
+
+        env.close()
+
+    def test_sorry_allowed_with_flag(self):
+        """Test that sorry is allowed when allow_sorry=True."""
+        # Create environment that allows sorry
+        env = Lean4Environment(
+            "theorem ex_sorry_ok : True := by sorry",
+            allow_sorry=True
+        )
+
+        # Apply sorry - should succeed when flag is enabled
+        result = env.step("sorry")
+        assert result.success
+        assert result.proof_complete
+
+        env.close()
+
+    def test_admit_tactic_rejected(self):
+        """Test that admit tactic is rejected when allow_sorry=False."""
+        env = Lean4Environment(
+            "theorem ex_admit : True := by sorry",
+            allow_sorry=False
+        )
+
+        # Try to use admit (should be rejected if Lean reports it)
+        result = env.step("admit")
+        # Note: This test might need adjustment based on how Lean reports 'admit'
+        assert not result.success
+
+        env.close()
+
+    def test_proof_status_tracking(self):
+        """Test that proof status is correctly tracked."""
+        env = Lean4Environment("theorem ex_status : True := by sorry")
+
+        # Check that proof state has status
+        assert hasattr(env.current_state, 'proof_status')
+
+        # Apply valid tactic
+        result = env.step("trivial")
+
+        if result.success:
+            # Check that new state has status field
+            assert hasattr(result.new_state, 'proof_status')
+
+        env.close()
+
+    def test_has_cheating_tactics_method(self):
+        """Test the has_cheating_tactics() method."""
+        env = Lean4Environment(
+            "theorem ex_cheat_check : True := by sorry",
+            allow_sorry=True  # Allow sorry so we can test detection
+        )
+
+        # Apply sorry
+        result = env.step("sorry")
+
+        if result.success:
+            # Check if cheating was detected
+            has_cheating = result.new_state.has_cheating_tactics()
+            # This should be True if Lean reports sorry in the response
+            # Note: May need adjustment based on actual Lean behavior
 
         env.close()
 

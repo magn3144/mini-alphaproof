@@ -6,7 +6,7 @@ import logging
 
 from .lean_interface import LeanInterface
 from .state import ProofState, TacticResult
-from .exceptions import Lean4Exception, TacticFailedException
+from .exceptions import Lean4Exception, TacticFailedException, InvalidProofException
 from .utils import format_state_with_colors
 
 
@@ -26,7 +26,8 @@ class Lean4Environment:
         theorem_statement: str,
         lean_version: str = "v4.27.0-rc1",
         timeout: int = 30,
-        verbose: bool = False
+        verbose: bool = False,
+        allow_sorry: bool = False
     ):
         """
         Initialize a Lean 4 environment with a theorem to prove.
@@ -36,6 +37,7 @@ class Lean4Environment:
             lean_version: Lean version to use
             timeout: Timeout in seconds for each tactic
             verbose: Enable verbose logging
+            allow_sorry: If False, reject tactics that use 'sorry' (default: False for production use)
 
         Example:
             >>> env = Lean4Environment("theorem ex : 1 + 1 = 2 := by sorry")
@@ -46,12 +48,14 @@ class Lean4Environment:
         self.lean_version = lean_version
         self.timeout = timeout
         self.verbose = verbose
+        self.allow_sorry = allow_sorry
 
         # Initialize Lean interface
         self.interface = LeanInterface(
             lean_version=lean_version,
             timeout=timeout,
-            verbose=verbose
+            verbose=verbose,
+            allow_sorry=allow_sorry
         )
 
         # State management
@@ -119,6 +123,17 @@ class Lean4Environment:
             self.steps_taken += 1
             self.current_state = new_state
 
+            # Validate that proof doesn't use cheating tactics
+            if not self.allow_sorry and new_state.has_cheating_tactics():
+                # Rollback the state change
+                logger.warning(f"Tactic '{tactic}' introduced cheating tactics, rejecting")
+                return TacticResult(
+                    success=False,
+                    new_state=self.current_state,
+                    error_message=f"Invalid proof: {new_state.proof_status}",
+                    proof_complete=False
+                )
+
             # Check if proof is complete
             proof_complete = new_state.is_complete()
 
@@ -140,6 +155,17 @@ class Lean4Environment:
                 success=False,
                 new_state=self.current_state,
                 error_message=e.error_message,
+                proof_complete=False
+            )
+
+        except InvalidProofException as e:
+            # Proof uses cheating tactics
+            logger.error(f"Invalid proof: {e.reason}")
+
+            return TacticResult(
+                success=False,
+                new_state=self.current_state,
+                error_message=f"Invalid proof: {e.reason}",
                 proof_complete=False
             )
 

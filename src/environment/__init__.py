@@ -12,7 +12,8 @@ from .exceptions import (
     TacticFailedException,
     TheoremSyntaxException,
     ServerCrashException,
-    TimeoutException
+    TimeoutException,
+    InvalidProofException
 )
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "TheoremSyntaxException",
     "ServerCrashException",
     "TimeoutException",
+    "InvalidProofException",
 ]
 
 __version__ = "0.1.0"

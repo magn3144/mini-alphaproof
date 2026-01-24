@@ -58,6 +58,8 @@ class ProofState:
     proof_state_id: Optional[int] = None
     messages: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    proof_status: Optional[str] = None
+    sorries: List = field(default_factory=list)
 
     def is_complete(self) -> bool:
         """Check if the proof is complete (no remaining goals)."""
@@ -66,6 +68,25 @@ class ProofState:
     def num_goals(self) -> int:
         """Return the number of remaining goals."""
         return len(self.goals)
+
+    def has_cheating_tactics(self) -> bool:
+        """
+        Check if the proof state contains cheating tactics.
+
+        Returns:
+            True if proof uses sorry, admit, or other invalid tactics
+        """
+        # Check if we have sorries
+        if self.sorries:
+            return True
+
+        # Check proof status
+        if self.proof_status:
+            proof_status_lower = self.proof_status.lower()
+            if "sorry" in proof_status_lower or "admit" in proof_status_lower:
+                return True
+
+        return False
 
     def to_string(self, format: str = "human") -> str:
         """
@@ -79,6 +100,10 @@ class ProofState:
         """
         if format == "human":
             lines = []
+
+            # Show proof status if available
+            if self.proof_status:
+                lines.append(f"Proof Status: {self.proof_status}")
 
             # Status line
             if self.is_complete():
@@ -113,10 +138,17 @@ class ProofState:
             return "\n".join(lines)
 
         elif format == "llm":
-            if self.is_complete():
-                return "Proof complete. No remaining goals."
+            lines = []
 
-            lines = [f"Goals: {self.num_goals()}"]
+            # Include proof status
+            if self.proof_status:
+                lines.append(f"Proof Status: {self.proof_status}")
+
+            if self.is_complete():
+                lines.append("Proof complete. No remaining goals.")
+                return "\n".join(lines) if lines else "Proof complete. No remaining goals."
+
+            lines.append(f"Goals: {self.num_goals()}")
             for i, goal in enumerate(self.goals, 1):
                 lines.append(f"Goal {i}: {goal.to_string(format='llm')}")
 
@@ -137,6 +169,8 @@ class ProofState:
                 ],
                 "complete": self.is_complete(),
                 "num_goals": self.num_goals(),
+                "proof_status": self.proof_status,
+                "has_cheating": self.has_cheating_tactics(),
                 "messages": self.messages,
                 "errors": self.errors,
                 "env_id": self.env_id,

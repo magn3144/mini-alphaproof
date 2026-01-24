@@ -36,3 +36,24 @@ class TimeoutException(Lean4Exception):
         self.tactic = tactic
         self.timeout = timeout
         super().__init__(f"Tactic '{tactic}' timed out after {timeout} seconds")
+
+
+class InvalidProofException(Lean4Exception):
+    """
+    Raised when a proof uses invalid or 'cheating' tactics.
+
+    This includes tactics like 'sorry' or 'admit' that create
+    incomplete or unsound proofs.
+    """
+
+    def __init__(self, tactic: str, reason: str):
+        """
+        Initialize InvalidProofException.
+
+        Args:
+            tactic: The tactic that caused the invalid proof
+            reason: Description of why the proof is invalid
+        """
+        self.tactic = tactic
+        self.reason = reason
+        super().__init__(f"Invalid proof after tactic '{tactic}': {reason}")

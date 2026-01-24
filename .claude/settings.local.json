@@ -12,7 +12,8 @@
       "Bash(python:*)",
       "Bash(export PATH=\"$HOME/.elan/bin:$PATH\")",
       "Bash(ls:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(pytest:*)"
     ]
   }
 }

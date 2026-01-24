@@ -18,7 +18,8 @@ from .exceptions import (
     ServerCrashException,
     TheoremSyntaxException,
     TacticFailedException,
-    TimeoutException
+    TimeoutException,
+    InvalidProofException
 )
 from .state import Goal, ProofState
 
@@ -36,7 +37,8 @@ class LeanInterface:
         self,
         lean_version: str = "v4.27.0-rc1",
         timeout: int = 30,
-        verbose: bool = False
+        verbose: bool = False,
+        allow_sorry: bool = False
     ):
         """
         Initialize the Lean interface.
@@ -45,10 +47,12 @@ class LeanInterface:
             lean_version: Lean version to use (e.g., "v4.27.0-rc1")
             timeout: Timeout in seconds for tactic execution
             verbose: Enable verbose logging
+            allow_sorry: If False, reject tactics that use 'sorry' or other cheating tactics
         """
         self.lean_version = lean_version
         self.timeout = timeout
         self.verbose = verbose
+        self.allow_sorry = allow_sorry
         self.server: Optional[AutoLeanServer] = None
         self._current_env_id: Optional[int] = None
 
@@ -164,6 +168,61 @@ class LeanInterface:
             logger.error(f"Error initializing theorem: {e}")
             raise TheoremSyntaxException(theorem, str(e))
 
+    def _validate_proof_response(
+        self,
+        response: Any,  # ProofStepResponse
+        tactic: str
+    ) -> None:
+        """
+        Validate that a proof response doesn't use cheating tactics.
+
+        Args:
+            response: ProofStepResponse from lean-interact
+            tactic: The tactic that was applied
+
+        Raises:
+            InvalidProofException: If proof uses sorry or other invalid tactics
+        """
+        if self.allow_sorry:
+            return  # Skip validation if sorry is allowed
+
+        # Check proof_status field
+        proof_status = getattr(response, 'proof_status', '')
+        if proof_status:
+            proof_status_lower = proof_status.lower()
+
+            # Check for "sorry" in status
+            if "sorry" in proof_status_lower and proof_status_lower.startswith("incomplete"):
+                raise InvalidProofException(
+                    tactic,
+                    f"Proof contains 'sorry': {proof_status}"
+                )
+
+            # Check for "admit" in status
+            if "admit" in proof_status_lower:
+                raise InvalidProofException(
+                    tactic,
+                    f"Proof uses 'admit' tactic: {proof_status}"
+                )
+
+        # Check sorries list
+        sorries = getattr(response, 'sorries', [])
+        if sorries:
+            raise InvalidProofException(
+                tactic,
+                f"Proof introduced {len(sorries)} sorry(ies)"
+            )
+
+        # Check messages for sorry-related warnings
+        messages = getattr(response, 'messages', [])
+        for message in messages:
+            message_data = getattr(message, 'data', '')
+            if "declaration uses 'sorry'" in message_data:
+                raise InvalidProofException(
+                    tactic,
+                    "Proof declaration uses 'sorry'"
+                )
+
     def execute_tactic(
         self,
         tactic: str,
@@ -202,10 +261,16 @@ class LeanInterface:
             if isinstance(response, LeanError):
                 raise TacticFailedException(tactic, response.message)
 
+            # Validate that proof doesn't use cheating tactics
+            self._validate_proof_response(response, tactic)
+
             # Convert ProofStepResponse to dictionary format
             result = {
                 "goals": response.goals,
                 "proof_state_id": response.proof_state,
+                "proof_status": getattr(response, 'proof_status', None),
+                "sorries": getattr(response, 'sorries', []),
+                "messages": getattr(response, 'messages', []),
                 "error": None
             }
 
@@ -286,13 +351,19 @@ class LeanInterface:
         if "error" in response and response["error"]:
             errors = [response["error"]]
 
+        # Extract proof status and sorries
+        proof_status = response.get("proof_status", None)
+        sorries = response.get("sorries", [])
+
         # Create proof state
         proof_state = ProofState(
             goals=goals_list,
             env_id=response.get("env_id"),
             proof_state_id=response.get("proof_state_id"),
             messages=messages,
-            errors=errors
+            errors=errors,
+            proof_status=proof_status,
+            sorries=sorries
         )
 
         return proof_state
