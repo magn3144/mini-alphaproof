@@ -87,3 +87,6 @@ coverage.xml
 *.tar.gz
 *.zip
 *.rar
+
+# Documents
+*.pdf

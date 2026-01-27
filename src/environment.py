@@ -6,6 +6,9 @@ import enum
 import typing
 from typing import Any
 
+from lean_interact import LeanREPLConfig, LeanServer, Command, ProofStep
+from lean_interact.interface import LeanError
+
 
 # Observations in AlphaProof are the tactic state.
 Observation = str
@@ -40,14 +43,92 @@ class Theorem(typing.NamedTuple):
 class Environment:
   """Lean environment."""
 
+  def __init__(self):
+    self.server = LeanServer(LeanREPLConfig())
+    self._next_id = 0
+    # state_id -> (proof_state_int, env_int)
+    self._states: dict[int, tuple[State, int]] = {}
+
+  def _alloc(self, proof_state: State, env: int) -> int:
+    sid = self._next_id
+    self._next_id += 1
+    self._states[sid] = (proof_state, env)
+    return sid
+
   def initial_state(self, theorem: Theorem) -> State:
     """Returns the initial tactic state."""
-    raise NotImplementedError()
+    cmd = f"{theorem.header}\ntheorem _target : {theorem.statement} := by sorry"
+    result = self.server.run(Command(cmd=cmd))
+    if isinstance(result, LeanError):
+      raise ValueError(result.message)
+    sorry = result.sorries[0]
+    # Get full tactic state (hypotheses + goal) by running skip.
+    skip_result = self.server.run(ProofStep(tactic="skip", proof_state=sorry.proof_state))
+    if isinstance(skip_result, LeanError):
+      raise ValueError(f"Failed to get tactic state: {skip_result.message}")
+    sid = self._alloc(sorry.proof_state, result.env)
+    return State(
+        id=sid,
+        reward=0.0,
+        observation=skip_result.goals[0],
+        terminal=False,
+        num_goals=1,
+    )
 
-  def step(self, state_id: int, action: Action) -> State:
-    """Applies the action in the given state, returns the new state."""
-    raise NotImplementedError()
-  
+  def _isolate_goal(self, proof_state: State, goal_index: int, num_goals: int) -> tuple[State, str]:
+    """Isolate a single goal by sorry-ing all others (internalSorry).
+
+    Returns (isolated_proof_state, goal_string).
+    """
+    if num_goals <= 1:
+      result = self.server.run(ProofStep(tactic="skip", proof_state=proof_state))
+      if isinstance(result, LeanError):
+        raise RuntimeError(f"Failed to skip: {result.message}")
+      return proof_state, result.goals[0]
+    ps = proof_state
+    result = self.server.run(ProofStep(tactic=f"rotate_left {goal_index + 1}", proof_state=ps))
+    if isinstance(result, LeanError):
+      raise RuntimeError(f"Failed to rotate: {result.message}")
+    ps = result.proof_state
+    for _ in range(num_goals - 1):
+      result = self.server.run(ProofStep(tactic="sorry", proof_state=ps))
+      if isinstance(result, LeanError):
+        raise RuntimeError(f"Failed to sorry: {result.message}")
+      ps = result.proof_state
+    # Get the full tactic state (hypotheses + goal) from the isolated proof state.
+    result = self.server.run(ProofStep(tactic="skip", proof_state=ps))
+    if isinstance(result, LeanError):
+      raise RuntimeError(f"Failed to skip after isolation: {result.message}")
+    return ps, result.goals[0]
+
+  def step(self, state_id: int, action: Action) -> list[State] | None:
+    """Applies the action in the given state, returns a list of states (one per goal)."""
+    proof_state, env = self._states[state_id]
+    result = self.server.run(ProofStep(tactic=action, proof_state=proof_state))
+    if isinstance(result, LeanError):
+      raise ValueError(result.message)
+    goals = result.goals
+    n = len(goals)
+    if n == 0:
+      return [State(
+          id=self._alloc(result.proof_state, env),
+          reward=-1.0,
+          observation=None,
+          terminal=True,
+          num_goals=0,
+      )]
+    states = []
+    for i in range(n):
+      isolated_ps, tactic_state = self._isolate_goal(result.proof_state, i, n)
+      states.append(State(
+          id=self._alloc(isolated_ps, env),
+          reward=-1.0,
+          observation=tactic_state,
+          terminal=False,
+          num_goals=1,
+      ))
+    return states
+
 
 class Node:
   """Node in the search tree."""
