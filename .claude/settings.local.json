@@ -20,7 +20,9 @@
       "Bash(pip show:*)",
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:lean-lang.org)"
+      "WebFetch(domain:lean-lang.org)",
+      "WebFetch(domain:docs.nobodywho.ooo)",
+      "Bash(grep:*)"
     ]
   }
 }

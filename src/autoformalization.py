@@ -4,8 +4,16 @@
 
 import collections
 import enum
+import re
+
+from nobodywho import Chat
+from lean_interact import LeanREPLConfig, LeanServer, Command
+from lean_interact.interface import LeanError
 
 Counter = collections.Counter
+
+herald_chat = Chat("../models/herald_q4_k_m.gguf")
+_lean_server = LeanServer(LeanREPLConfig())
 
 
 class ComputeBudget(enum.Enum):
@@ -14,43 +22,67 @@ class ComputeBudget(enum.Enum):
 
 
 def sample_auto_formalization(nl_problem: str) -> str:
-  """Samples a Lean formalization using a finetuned version of Gemini."""
-  raise NotImplementedError()
+  """Samples a Lean formalization using an LLM."""
+  prompt = f"Instruction: Translate to Lean 4.\nInput: {nl_problem}\nOutput:"
+  response = herald_chat.ask(prompt).completed()
+  return response.strip()
 
 
 def extract_lean_code(sample: str) -> str:
   """Extracts the Lean code from a sample."""
-  raise NotImplementedError()
+  stripped = sample.strip()
+  for keyword in ("theorem", "lemma", "def"):
+    idx = stripped.find(keyword)
+    if idx != -1:
+      return stripped[idx:]
+  return stripped
 
 
 def lean_is_valid_syntax(lean_statement: str) -> bool:
   """Validates Lean code for syntax and common linting errors."""
-  raise NotImplementedError()
+  result = _lean_server.run(Command(cmd=lean_statement))
+  return not isinstance(result, LeanError)
 
 
 def lean_is_complete_proof(lean_code: str) -> bool:
   """Checks if Lean accepts the code as a full proof."""
-  raise NotImplementedError()
+  result = _lean_server.run(Command(cmd=lean_code))
+  if isinstance(result, LeanError):
+    return False
+  return len(result.sorries) == 0
 
 
 def lean_replace_goal_with_false(lean_code: str) -> str:
   """Creates a new statement where the goal is to prove a contradiction is among the hypotheses."""
-  raise NotImplementedError()
+  # Match ": <goal> :=" and replace the goal with False
+  return re.sub(r':\s*([^:=]+?)\s*:=', ': False :=', lean_code, count=1)
 
 
 def lean_negate_statement(lean_code: str) -> str:
   """Creates a new statement where the goal is to disprove the original statement."""
-  raise NotImplementedError()
+  # Match ": <goal> :=" and wrap the goal in ¬(...)
+  def _negate(m):
+    goal = m.group(1).strip()
+    return f': ¬({goal}) :='
+  return re.sub(r':\s*([^:=]+?)\s*:=', _negate, lean_code, count=1)
 
 
 def is_provable(lean_statement: str, budget: ComputeBudget) -> bool:
   """Runs Alphaproof to check if the Lean statement is provable."""
-  raise NotImplementedError()
+  # Stub: full AlphaProof search not yet available.
+  return False
 
 
 def has_trivial_counterexample(lean_statement: str) -> bool:
   """Run a modified version of Lean's `plausible` tactic with extra support for real numbers."""
-  raise NotImplementedError()
+  # Build a version of the statement that uses the plausible tactic
+  code = re.sub(r':= by\s+sorry', ':= by plausible', lean_statement)
+  if code == lean_statement:
+    # No substitution happened, append manually
+    code = lean_statement + " := by plausible"
+  result = _lean_server.run(Command(cmd=code))
+  # If plausible succeeds (no error), it found a counterexample
+  return not isinstance(result, LeanError)
 
 
 def is_easily_provable(lean_statement: str) -> bool:
@@ -74,8 +106,13 @@ def is_easily_provable(lean_statement: str) -> bool:
 
 def deformalize_lean(lean_statement: str) -> str:
   """Deformalizes a Lean statement into a natural language statement."""
-  # Uses an off-the-shelf, publicly available model.
-  raise NotImplementedError()
+  herald_chat.system(
+      "You are an expert at reading Lean 4 code and explaining it in plain "
+      "natural language. Given a Lean 4 theorem statement, output a clear "
+      "natural language description of what it states. Output only the "
+      "natural language description, no code or extra commentary."
+  )
+  return herald_chat.chat(lean_statement)
 
 
 def check_cycle_consistency(
@@ -83,8 +120,18 @@ def check_cycle_consistency(
     deformalized_statement: str,
 ) -> bool:
   """Checks if the original and deformalized statements are equivalent."""
-  # Uses an off-the-shelf, publicly available model.
-  raise NotImplementedError()
+  herald_chat.system(
+      "You are a math expert. You will be given two mathematical statements. "
+      "Determine if they are mathematically equivalent. "
+      "Answer with exactly 'yes' or 'no'."
+  )
+  prompt = (
+      f"Statement 1: {original_statement}\n\n"
+      f"Statement 2: {deformalized_statement}\n\n"
+      "Are these two statements mathematically equivalent?"
+  )
+  response = herald_chat.chat(prompt).strip().lower()
+  return response.startswith("yes")
 
 
 def auto_formalize_problem(nl_problem: str, n_samples: int) -> str | None:

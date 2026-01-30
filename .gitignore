@@ -90,3 +90,7 @@ coverage.xml
 
 # Documents
 *.pdf
+
+# Models
+*.gguf
+models/
