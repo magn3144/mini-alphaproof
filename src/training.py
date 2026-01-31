@@ -5,17 +5,24 @@
 import dataclasses
 import random
 import typing
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from src.environment import (
     Environment, Config, Node, Game, Theorem, Player, Observation, Action, Params
 )
+from src.models.heads import PolicyHead, ValueHead
+from src.models.tokenizer import SimpleTokenizer
+from src.models.transformer import TransformerEncoderDecoder
+
 from lean_interact import LeanREPLConfig, LeanServer, Command
 from lean_interact.interface import LeanError
-from mcts import run_mcts
+from src.mcts import run_mcts
+
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
 ##### Helpers #####
@@ -154,61 +161,416 @@ class NetworkSamplingOutput(typing.NamedTuple):
 
 
 class Network:
-  def __init__(self, config: Config):
-    self.params = {'weights': torch.tensor([0.0], requires_grad=True)}
+  """Encoder-decoder network with policy and value heads.
 
+  Supports three initialization modes:
+  1. Random initialization from config
+  2. Loading from checkpoint
+  3. Loading pretrained model from HuggingFace
+  """
+
+  def __init__(
+      self,
+      config: Config,
+      model_path: Optional[str] = None,
+      pretrained_model_name: Optional[str] = None,
+      hidden_dim: int = 512,
+      num_layers: int = 6,
+      num_heads: int = 8,
+      dropout: float = 0.1,
+      num_action_samples: int = 16,
+  ):
+    """Initialize network.
+
+    Args:
+        config: AlphaProof config
+        model_path: Path to checkpoint (for loading saved model)
+        pretrained_model_name: HuggingFace model name (e.g., "google/byt5-small")
+        hidden_dim: Hidden dimension (for random init)
+        num_layers: Number of encoder/decoder layers (for random init)
+        num_heads: Number of attention heads (for random init)
+        dropout: Dropout probability (for random init)
+        num_action_samples: Number of actions to sample per state
+    """
+    self.config = config
     self.num_value_bins = config.num_value_bins
     self.value_weight = config.value_weight
-    self.optimizer = torch.optim.Adam([self.params['weights']], lr=config.lr)
+    self.num_action_samples = num_action_samples
+    self.params = {}  # For compatibility with existing code
 
-  def _compute_loss(self, batch):
-    loss = torch.tensor(0.0, requires_grad=True)
-    for observations, actions, value_targets in batch:
-      network_output = self.forward(self.params, observations, actions)
-      # Policy loss
-      policy_loss = F.cross_entropy(
-          network_output.policy_logits, actions
+    # Store model architecture params for saving
+    self.model_num_layers = num_layers
+    self.model_num_heads = num_heads
+    self.model_dropout = dropout
+
+    # Value bin centers for discretization
+    self.value_bins = torch.linspace(
+        config.no_legal_actions_value, 0, config.num_value_bins
+    )
+
+    # Determine initialization mode and build model
+    if model_path is not None:
+      self._load_from_checkpoint(model_path, config)
+    elif pretrained_model_name is not None:
+      self._load_pretrained(pretrained_model_name, config)
+    else:
+      self._build_random_model(
+          hidden_dim, num_layers, num_heads, dropout, config
       )
-      # Value loss
-      v_loss = value_loss(network_output.value_logits, value_targets)
-      loss = loss + policy_loss + self.value_weight * v_loss
 
-    return loss
+    # Setup optimizer
+    self.optimizer = torch.optim.Adam(
+        self._get_trainable_parameters(), lr=config.lr
+    )
+
+  def _build_random_model(
+      self,
+      hidden_dim: int,
+      num_layers: int,
+      num_heads: int,
+      dropout: float,
+      config: Config,
+  ):
+    """Build model with random initialization."""
+    self.is_pretrained = False
+    self.pretrained_model_name = None
+
+    # Create tokenizer
+    self.tokenizer = SimpleTokenizer()
+
+    # Create transformer
+    self.transformer = TransformerEncoderDecoder(
+        vocab_size=self.tokenizer.vocab_size,
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        dropout=dropout,
+    )
+
+    self.hidden_dim = hidden_dim
+    self.vocab_size = self.tokenizer.vocab_size
+
+    # Create policy head (custom for random init)
+    self.policy_head = self.transformer.output_projection  # Reuse output projection
+
+    # Create value head
+    self.value_head = ValueHead(hidden_dim, config.num_value_bins)
+
+  def _load_pretrained(self, model_name: str, config: Config):
+    """Load pretrained model from HuggingFace."""
+
+    self.is_pretrained = True
+    self.pretrained_model_name = model_name
+
+    # Load pretrained model and tokenizer
+    self.transformer = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    # Get hidden dimension from model config
+    if hasattr(self.transformer.config, 'd_model'):
+      self.hidden_dim = self.transformer.config.d_model
+    elif hasattr(self.transformer.config, 'hidden_size'):
+      self.hidden_dim = self.transformer.config.hidden_size
+    else:
+      raise ValueError(f"Cannot determine hidden_dim from {model_name} config")
+
+    self.vocab_size = self.transformer.config.vocab_size
+
+    # Policy head is the pretrained LM head (don't create new one)
+    self.policy_head = None  # Will use transformer's built-in lm_head
+
+    # Create value head (task-specific, always random init)
+    self.value_head = ValueHead(self.hidden_dim, config.num_value_bins)
+
+  def _load_from_checkpoint(self, path: str, config: Config):
+    """Load model from checkpoint."""
+    checkpoint = torch.load(path, map_location='cpu')
+    model_config = checkpoint['model_config']
+    self.is_pretrained = model_config.get('is_pretrained', False)
+
+    # Restore model architecture params
+    self.model_num_layers = model_config.get('num_layers', 6)
+    self.model_num_heads = model_config.get('num_heads', 8)
+    self.model_dropout = model_config.get('dropout', 0.1)
+
+    if self.is_pretrained:
+      # Reload pretrained model
+      pretrained_name = model_config['pretrained_model_name']
+      self._load_pretrained(pretrained_name, config)
+      # Load transformer weights
+      self.transformer.load_state_dict(checkpoint['transformer_state_dict'])
+    else:
+      # Reconstruct custom transformer with SAME architecture
+      self.tokenizer = SimpleTokenizer.from_config(checkpoint['tokenizer_config'])
+      self.transformer = TransformerEncoderDecoder(
+          vocab_size=model_config['vocab_size'],
+          hidden_dim=model_config['hidden_dim'],
+          num_layers=self.model_num_layers,
+          num_heads=self.model_num_heads,
+          dropout=self.model_dropout,
+      )
+      self.transformer.load_state_dict(checkpoint['transformer_state_dict'])
+
+      self.hidden_dim = model_config['hidden_dim']
+      self.vocab_size = model_config['vocab_size']
+      self.policy_head = self.transformer.output_projection
+
+    # Always load value head
+    self.value_head = ValueHead(
+        model_config['hidden_dim'], config.num_value_bins
+    )
+    self.value_head.load_state_dict(checkpoint['value_head_state_dict'])
+
+  def _get_trainable_parameters(self):
+    """Get all trainable parameters."""
+    params = list(self.transformer.parameters())
+    params.extend(self.value_head.parameters())
+    return params
 
   def forward(
       self, params: Params, observation: torch.Tensor, action: torch.Tensor
   ) -> NetworkTrainingOutput:
-    # Predict value logits and policy logits from given observation and action.
-    # observation and action are passed to the network.
-    value_logits = torch.zeros(self.num_value_bins)
-    policy_logits = torch.tensor([0.0])
+    """Forward pass for training.
+
+    Args:
+        params: Placeholder for compatibility
+        observation: Tokenized observation (batch_size, src_seq_len)
+        action: Tokenized action (batch_size, tgt_seq_len)
+
+    Returns:
+        NetworkTrainingOutput with value_logits and policy_logits
+    """
+    if self.is_pretrained:
+      # Use pretrained model's native forward
+      outputs = self.transformer(
+          input_ids=observation,
+          labels=action,
+          output_hidden_states=True,
+      )
+      policy_logits = outputs.logits[:, -1, :]  # Last token logits
+      decoder_hidden = outputs.decoder_hidden_states[-1][:, -1, :]
+    else:
+      # Use custom transformer
+      decoder_output, output_logits = self.transformer(observation, action)
+      policy_logits = output_logits[:, -1, :]  # Last token logits
+      decoder_hidden = decoder_output[:, -1, :]
+
+    # Compute value from decoder hidden state
+    value_logits = self.value_head(decoder_hidden)
+
     return NetworkTrainingOutput(
         value_logits=value_logits, policy_logits=policy_logits
     )
 
   def sample(self, observation: str) -> NetworkSamplingOutput:
-    # Predict value and sample actions from a given observation.
-    # observation is tokenized and passed to the network to produce value
-    # logits. The value is then calcualated from value logits and bin locations.
-    value = 0.
-    return NetworkSamplingOutput(action_logprobs={'placeholder_action': -2.},
-                                 value=value)
+    """Sample multiple actions from observation.
+
+    Uses encoder caching optimization: encodes state once, then samples
+    multiple actions from the cached encoder output.
+
+    Args:
+        observation: Observation string (tactic state)
+
+    Returns:
+        NetworkSamplingOutput with action_logprobs and value
+    """
+    # Tokenize observation
+    obs_tokens = self.tokenizer.encode(
+        observation, add_special_tokens=True, return_tensors="pt"
+    )
+
+    with torch.no_grad():
+      if self.is_pretrained:
+        # Encode once with pretrained model
+        encoder = self.transformer.get_encoder()
+        encoder_outputs = encoder(input_ids=obs_tokens)
+        encoder_hidden = encoder_outputs.last_hidden_state
+
+        # Compute value from encoder representation
+        state_repr = encoder_hidden.mean(dim=1)  # Mean pooling
+        value_logits = self.value_head(state_repr)
+        value = self._value_from_logits(value_logits)
+
+        # Sample multiple actions from cached encoder output
+        action_logprobs = {}
+        for _ in range(self.num_action_samples):
+          # Generate with HuggingFace generate method
+          generated = self.transformer.generate(
+              encoder_outputs=encoder_outputs,
+              max_length=100,
+              do_sample=True,
+              temperature=1.0,
+              num_return_sequences=1,
+          )
+
+          # Decode and compute log probability
+          action_str = self.tokenizer.decode(
+              generated[0], skip_special_tokens=True
+          )
+
+          # Compute log probability
+          logprob = self._compute_action_logprob_pretrained(
+              generated[0], encoder_outputs
+          )
+
+          # Avoid duplicate actions
+          if action_str not in action_logprobs:
+            action_logprobs[action_str] = logprob
+
+      else:
+        # Encode once with custom model
+        encoder_output = self.transformer.encode(obs_tokens)
+
+        # Compute value from encoder representation
+        state_repr = encoder_output.mean(dim=1)  # Mean pooling
+        value_logits = self.value_head(state_repr)
+        value = self._value_from_logits(value_logits)
+
+        # Sample multiple actions from cached encoder output
+        action_logprobs = {}
+        for _ in range(self.num_action_samples):
+          # Generate sequence
+          generated = self.transformer.generate_sequence_cached(
+              encoder_output,
+              max_length=100,
+              start_token_id=self.tokenizer.bos_token_id,
+              end_token_id=self.tokenizer.eos_token_id,
+              temperature=1.0,
+              do_sample=True,
+          )
+
+          # Decode
+          action_str = self.tokenizer.decode(
+              generated[0], skip_special_tokens=True
+          )
+
+          # Compute log probability
+          logprob = self.transformer.compute_sequence_logprob(
+              generated, encoder_output
+          ).item()
+
+          # Avoid duplicates
+          if action_str not in action_logprobs:
+            action_logprobs[action_str] = logprob
+
+    return NetworkSamplingOutput(action_logprobs=action_logprobs, value=value)
+
+  def _compute_action_logprob_pretrained(
+      self, sequence: torch.Tensor, encoder_outputs
+  ) -> float:
+    """Compute log probability for pretrained model."""
+    # Use model to compute logits for sequence
+    outputs = self.transformer(
+        encoder_outputs=encoder_outputs,
+        decoder_input_ids=sequence[:-1].unsqueeze(0),
+    )
+    logits = outputs.logits[0]  # Remove batch dim
+    log_probs = torch.log_softmax(logits, dim=-1)
+
+    # Gather log probs of actual tokens
+    target_tokens = sequence[1:]  # Skip BOS
+    token_logprobs = log_probs[
+        torch.arange(len(target_tokens)), target_tokens
+    ]
+
+    return token_logprobs.sum().item()
+
+  def _value_from_logits(self, value_logits: torch.Tensor) -> float:
+    """Convert value logits to scalar value.
+
+    Args:
+        value_logits: (batch_size, num_value_bins)
+
+    Returns:
+        Scalar value
+    """
+    # Compute expected value using bin centers
+    probs = torch.softmax(value_logits, dim=-1)
+    value = (probs * self.value_bins).sum(dim=-1)
+    return value.item()
+
+  def _compute_loss(self, batch):
+    """Compute loss for a batch."""
+    loss = torch.tensor(0.0, requires_grad=True)
+
+    for observations, actions, value_targets in batch:
+      network_output = self.forward(self.params, observations, actions)
+
+      # Policy loss: cross-entropy on last token prediction
+      # actions is (batch_size, seq_len), we want to predict the last token
+      target_tokens = actions[:, -1]  # Last token
+      policy_loss = F.cross_entropy(
+          network_output.policy_logits, target_tokens
+      )
+
+      # Value loss: cross-entropy on value bins
+      # Convert value_targets to bin indices
+      value_bin_indices = self._value_to_bin_index(value_targets)
+      v_loss = F.cross_entropy(
+          network_output.value_logits,
+          value_bin_indices.unsqueeze(0),  # Add batch dim
+      )
+
+      loss = loss + policy_loss + self.value_weight * v_loss
+
+    return loss
+
+  def _value_to_bin_index(self, value: float) -> torch.Tensor:
+    """Convert scalar value to bin index."""
+    # Find closest bin
+    dists = torch.abs(self.value_bins - value)
+    bin_idx = torch.argmin(dists)
+    return bin_idx
 
   def update(self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]):
-    # Update the network weights.
+    """Update network weights."""
     self.optimizer.zero_grad()
     loss = self._compute_loss(batch)
     loss.backward()
     self.optimizer.step()
 
+  def save_checkpoint(self, path: str):
+    """Save model checkpoint."""
+    checkpoint = {
+        'transformer_state_dict': self.transformer.state_dict(),
+        'value_head_state_dict': self.value_head.state_dict(),
+        'model_config': {
+            'hidden_dim': self.hidden_dim,
+            'vocab_size': self.vocab_size,
+            'num_value_bins': self.num_value_bins,
+            'is_pretrained': self.is_pretrained,
+            'pretrained_model_name': self.pretrained_model_name if self.is_pretrained else None,
+        },
+        'optimizer_state_dict': self.optimizer.state_dict(),
+    }
+
+    # For custom models, save tokenizer and additional config
+    if not self.is_pretrained:
+      checkpoint['tokenizer_config'] = self.tokenizer.get_config()
+      checkpoint['model_config'].update({
+          'num_layers': self.model_num_layers,
+          'num_heads': self.model_num_heads,
+          'dropout': self.model_dropout,
+      })
+
+    torch.save(checkpoint, path)
+    print(f"Checkpoint saved to {path}")
+
 
 class ReplayBuffer:
 
-  def __init__(self, config: Config):
+  def __init__(self, config: Config, tokenizer=None):
+    """Initialize replay buffer.
+
+    Args:
+        config: AlphaProof config
+        tokenizer: Tokenizer for encoding observations and actions
+    """
     self.window_size = config.window_size
     self.batch_size = config.batch_size
     self.sequence_length = config.sequence_length
     self.buffer = []
+    self.tokenizer = tokenizer
 
   def save_game(self, game):
     transitions = extract_transitions(game.root)
@@ -227,7 +589,36 @@ class ReplayBuffer:
     return (tokenized_observation, tokenized_action, value)
 
   def tokenize(self, input_string: str) -> torch.Tensor:
-    return torch.zeros((self.batch_size, self.sequence_length), dtype=torch.int32)
+    """Tokenize input string.
+
+    Args:
+        input_string: String to tokenize
+
+    Returns:
+        Tokenized tensor (1, seq_len)
+    """
+    if self.tokenizer is None:
+      # Fallback to dummy tokenization if no tokenizer provided
+      return torch.zeros((1, self.sequence_length), dtype=torch.long)
+
+    # Use actual tokenizer
+    tokens = self.tokenizer.encode(
+        input_string,
+        add_special_tokens=True,
+        max_length=self.sequence_length,
+        return_tensors="pt",
+    )
+
+    # Pad if needed
+    if tokens.size(1) < self.sequence_length:
+      padding = torch.zeros(
+          (1, self.sequence_length - tokens.size(1)), dtype=torch.long
+      )
+      if hasattr(self.tokenizer, 'pad_token_id'):
+        padding.fill_(self.tokenizer.pad_token_id)
+      tokens = torch.cat([tokens, padding], dim=1)
+
+    return tokens
 
 
 class SharedStorage:

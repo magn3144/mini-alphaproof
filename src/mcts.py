@@ -3,11 +3,12 @@
 # pylint: disable=all
 
 import math
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
-from ap_types import Config, Node, Game, Player, Action, Observation
-from src.environment import Environment
-from src.training import Network
+from src.environment import Config, Node, Game, Player, Action, Observation, Environment
+
+if TYPE_CHECKING:
+  from src.training import Network
 
 
 # Core Monte Carlo tree search algorithm.
@@ -17,7 +18,7 @@ from src.training import Network
 def run_mcts(
     config: Config,
     game: Game,
-    network: Network,
+    network: 'Network',  # String annotation to avoid circular import
     environment: Environment,
 ):
   root = game.root
