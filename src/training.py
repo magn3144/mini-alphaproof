@@ -7,9 +7,8 @@ import random
 import typing
 from typing import Any, Dict, List
 
-import jax
-import jax.numpy as jnp
-import optax
+import torch
+import torch.nn.functional as F
 
 from ap_types import (
     Config, Node, Game, Theorem, Player, Observation, Action, Params
@@ -75,7 +74,7 @@ def final_check(game: Game) -> bool:
   return True
 
 
-def value_loss(value_logits: jax.Array, value_targets: float) -> float:
+def value_loss(value_logits: torch.Tensor, value_targets: float) -> float:
   # Calculate the categorical cross-entropy loss.
   return 0.0
 
@@ -98,8 +97,8 @@ def launch_job(f, *args):
 
 class NetworkTrainingOutput(typing.NamedTuple):
   """Output of the network during training."""
-  value_logits: jax.Array
-  policy_logits: jax.Array
+  value_logits: torch.Tensor
+  policy_logits: torch.Tensor
 
 
 class NetworkSamplingOutput(typing.NamedTuple):
@@ -110,38 +109,33 @@ class NetworkSamplingOutput(typing.NamedTuple):
 
 class Network:
   def __init__(self, config: Config):
-    self.params = {'weights': jnp.array([0])}
+    self.params = {'weights': torch.tensor([0.0], requires_grad=True)}
 
     self.num_value_bins = config.num_value_bins
     self.value_weight = config.value_weight
-    self.optimizer = optax.adam(config.lr)
-    self.opt_state = self.optimizer.init(self.params)
+    self.optimizer = torch.optim.Adam([self.params['weights']], lr=config.lr)
 
-    def _loss_fn(params, batch):
-      loss = 0
-      for observations, actions, value_targets in batch:
-        network_output = self.forward(params, observations, actions)
-        # Policy loss
-        loss += jnp.mean(
-            optax.softmax_cross_entropy_with_integer_labels(
-                network_output.policy_logits, actions
-            )
-        )
-        # Value loss
-        loss += self.value_weight * value_loss(network_output.value_logits,
-                                               value_targets)
+  def _compute_loss(self, batch):
+    loss = torch.tensor(0.0, requires_grad=True)
+    for observations, actions, value_targets in batch:
+      network_output = self.forward(self.params, observations, actions)
+      # Policy loss
+      policy_loss = F.cross_entropy(
+          network_output.policy_logits, actions
+      )
+      # Value loss
+      v_loss = value_loss(network_output.value_logits, value_targets)
+      loss = loss + policy_loss + self.value_weight * v_loss
 
-      return loss
-
-    self._loss_grad = jax.grad(_loss_fn)
+    return loss
 
   def forward(
-      self, params: Params, observation: jax.Array, action: jax.Array
+      self, params: Params, observation: torch.Tensor, action: torch.Tensor
   ) -> NetworkTrainingOutput:
     # Predict value logits and policy logits from given observation and action.
     # observation and action are passed to the network.
-    value_logits = jnp.zeros(self.num_value_bins)
-    policy_logits = jnp.array([0])
+    value_logits = torch.zeros(self.num_value_bins)
+    policy_logits = torch.tensor([0.0])
     return NetworkTrainingOutput(
         value_logits=value_logits, policy_logits=policy_logits
     )
@@ -154,13 +148,12 @@ class Network:
     return NetworkSamplingOutput(action_logprobs={'placeholder_action': -2.},
                                  value=value)
 
-  def update(self, batch: list[tuple[jax.Array, jax.Array, float]]):
+  def update(self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]):
     # Update the network weights.
-    grads = self._loss_grad(self.params, batch)
-    updates, self.opt_state = self.optimizer.update(
-        grads, self.opt_state, self.params
-    )
-    self.params = optax.apply_updates(self.params, updates)
+    self.optimizer.zero_grad()
+    loss = self._compute_loss(batch)
+    loss.backward()
+    self.optimizer.step()
 
 
 class ReplayBuffer:
@@ -176,10 +169,10 @@ class ReplayBuffer:
     self.buffer.extend(transitions)
     self.buffer = self.buffer[-self.window_size:]
 
-  def sample_batch(self) -> list[tuple[jax.Array, jax.Array, float]]:
+  def sample_batch(self) -> list[tuple[torch.Tensor, torch.Tensor, float]]:
     return [self.sample_transition() for _ in range(self.batch_size)]
 
-  def sample_transition(self) -> tuple[jax.Array, jax.Array, float]:
+  def sample_transition(self) -> tuple[torch.Tensor, torch.Tensor, float]:
     # Sample transition from buffer either uniformly or according to some
     # priority.
     observation, action, value = self.buffer[0]
@@ -187,8 +180,8 @@ class ReplayBuffer:
     tokenized_action = self.tokenize(action)
     return (tokenized_observation, tokenized_action, value)
 
-  def tokenize(self, input_string: str) -> jax.Array:
-    return jnp.zeros((self.batch_size, self.sequence_length), dtype=jnp.int32)
+  def tokenize(self, input_string: str) -> torch.Tensor:
+    return torch.zeros((self.batch_size, self.sequence_length), dtype=torch.int32)
 
 
 class SharedStorage:
