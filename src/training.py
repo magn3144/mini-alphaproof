@@ -10,10 +10,11 @@ from typing import Any, Dict, List
 import torch
 import torch.nn.functional as F
 
-from ap_types import (
-    Config, Node, Game, Theorem, Player, Observation, Action, Params
+from src.environment import (
+    Environment, Config, Node, Game, Theorem, Player, Observation, Action, Params
 )
-from src.environment import Environment
+from lean_interact import LeanREPLConfig, LeanServer, Command
+from lean_interact.interface import LeanError
 from mcts import run_mcts
 
 
@@ -66,11 +67,56 @@ def select_optimal_action(node: Node) -> Action:
   return action
 
 
+def _extract_tactics(node: Node) -> list[str]:
+  """Extract the sequence of tactics from the optimal path in the tree."""
+  tactics = []
+  while not node.is_terminal:
+    if node.to_play == Player.OR:
+      action = select_optimal_action(node)
+      tactics.append(action)
+      node = node.children[action]
+    elif node.to_play == Player.AND:
+      # AND node: all children must be solved. Recurse into each,
+      # wrapping sub-proofs with `· ` (Lean focusing syntax).
+      for child in node.children.values():
+        child_tactics = _extract_tactics(child)
+        if child_tactics:
+          tactics.extend([f"· {t}" for t in child_tactics])
+      break
+  return tactics
+
+
 def final_check(game: Game) -> bool:
   """Checks that the proof found is actually valid."""
-  # Extract tactics from the tree, write the statement and its proof to a file,
-  # add a footer checking the axioms, and then run the `lean` binary.
-  # Properly handle the case where we attempt to disprove a theorem.
+  tactics = _extract_tactics(game.root)
+  if not tactics:
+    return False
+
+  theorem = game.theorem
+  proof_body = "\n  ".join(tactics)
+
+  code = (
+      f"{theorem.header}\n"
+      f"theorem _final_check : {theorem.statement} := by\n"
+      f"  {proof_body}\n"
+  )
+
+  server = LeanServer(LeanREPLConfig())
+  # Check the proof compiles without errors or sorries.
+  result = server.run(Command(cmd=code))
+  if isinstance(result, LeanError):
+    return False
+  if result.sorries:
+    return False
+
+  # Check axioms to ensure no sorry-based axioms were used.
+  axiom_result = server.run(Command(cmd="#print axioms _final_check", env=result.env))
+  if isinstance(axiom_result, LeanError):
+    return False
+  for msg in axiom_result.messages:
+    if "sorry" in msg.data.lower():
+      return False
+
   return True
 
 
@@ -289,9 +335,7 @@ def play_game(config: Config, network: Network, matchmaker: Matchmaker) -> Game:
   game = matchmaker.get_start_position()
   environment = config.environment_ctor()
 
-  state = environment.initial_state(game.theorem)
-  if game.disprove:
-    state = environment.step(state.id, 'disprove')
+  state = environment.initial_state(game.theorem, game.disprove)
   game.root = Node(
       action=None,
       observation=state.observation,

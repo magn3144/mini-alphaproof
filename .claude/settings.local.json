@@ -22,7 +22,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:lean-lang.org)",
       "WebFetch(domain:docs.nobodywho.ooo)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(PYTHONPATH=src python:*)"
     ]
   }
 }
