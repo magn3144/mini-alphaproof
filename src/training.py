@@ -16,10 +16,10 @@ from src.environment import (
 from lean_interact import LeanREPLConfig, LeanServer, Command
 from lean_interact.interface import LeanError
 from mcts import run_mcts
+from network import Network, NetworkTrainingOutput
 
 
-##### Helpers #####
-
+##### Helpers #
 
 def compute_value_target(node: Node) -> float:
   """Computes the actual value for a node, to be used as a target in learning."""
@@ -120,11 +120,6 @@ def final_check(game: Game) -> bool:
   return True
 
 
-def value_loss(value_logits: torch.Tensor, value_targets: float) -> float:
-  # Calculate the categorical cross-entropy loss.
-  return 0.0
-
-
 def make_config() -> Config:
   return Config(
       num_simulations=800,
@@ -136,70 +131,6 @@ def make_config() -> Config:
 
 def launch_job(f, *args):
   f(*args)
-
-
-##### End Helpers #####
-
-
-class NetworkTrainingOutput(typing.NamedTuple):
-  """Output of the network during training."""
-  value_logits: torch.Tensor
-  policy_logits: torch.Tensor
-
-
-class NetworkSamplingOutput(typing.NamedTuple):
-  """Output of the network when sampling actions."""
-  action_logprobs: Dict[Action, float]
-  value: float
-
-
-class Network:
-  def __init__(self, config: Config):
-    self.params = {'weights': torch.tensor([0.0], requires_grad=True)}
-
-    self.num_value_bins = config.num_value_bins
-    self.value_weight = config.value_weight
-    self.optimizer = torch.optim.Adam([self.params['weights']], lr=config.lr)
-
-  def _compute_loss(self, batch):
-    loss = torch.tensor(0.0, requires_grad=True)
-    for observations, actions, value_targets in batch:
-      network_output = self.forward(self.params, observations, actions)
-      # Policy loss
-      policy_loss = F.cross_entropy(
-          network_output.policy_logits, actions
-      )
-      # Value loss
-      v_loss = value_loss(network_output.value_logits, value_targets)
-      loss = loss + policy_loss + self.value_weight * v_loss
-
-    return loss
-
-  def forward(
-      self, params: Params, observation: torch.Tensor, action: torch.Tensor
-  ) -> NetworkTrainingOutput:
-    # Predict value logits and policy logits from given observation and action.
-    # observation and action are passed to the network.
-    value_logits = torch.zeros(self.num_value_bins)
-    policy_logits = torch.tensor([0.0])
-    return NetworkTrainingOutput(
-        value_logits=value_logits, policy_logits=policy_logits
-    )
-
-  def sample(self, observation: str) -> NetworkSamplingOutput:
-    # Predict value and sample actions from a given observation.
-    # observation is tokenized and passed to the network to produce value
-    # logits. The value is then calcualated from value logits and bin locations.
-    value = 0.
-    return NetworkSamplingOutput(action_logprobs={'placeholder_action': -2.},
-                                 value=value)
-
-  def update(self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]):
-    # Update the network weights.
-    self.optimizer.zero_grad()
-    loss = self._compute_loss(batch)
-    loss.backward()
-    self.optimizer.step()
 
 
 class ReplayBuffer:
@@ -320,7 +251,7 @@ def run_actor(config: Config, storage: SharedStorage,
               replay_buffer: ReplayBuffer, matchmaker: Matchmaker):
   network = Network(config)
   while True:
-    network.params = storage.latest_params()
+    network.model = storage.latest_params()
     game = play_game(config, network, matchmaker)
     if game.root.is_optimal:
       replay_buffer.save_game(game)
@@ -371,10 +302,10 @@ def train_network(config: Config, storage: SharedStorage,
 
   for i in range(config.training_steps):
     if i % config.checkpoint_interval == 0:
-      storage.save_params(i, network.params)
+      storage.save_params(i, network.model)
     batch = replay_buffer.sample_batch()
     network.update(batch)
-  storage.save_params(config.training_steps, network.params)
+  storage.save_params(config.training_steps, network.model)
 
 
 # AlphaProof training is split into two independent parts: A learner which
