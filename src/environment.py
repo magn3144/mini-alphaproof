@@ -5,6 +5,7 @@
 import enum
 import typing
 from typing import Any, Callable
+from environment import Environment
 
 from lean_interact import LeanREPLConfig, LeanServer, Command, ProofStep
 from lean_interact.interface import LeanError
