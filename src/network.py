@@ -6,7 +6,7 @@ from typing import Dict
 
 from src.environment import Action
 from src.environment import (
-    Environment, Config, Node, Game, Theorem, Player, Observation, Action, Params
+    Environment, Config, Node, Game, Theorem, Player, Observation, Action
 )
 
 
@@ -28,7 +28,7 @@ class Network:
 
     self.num_value_bins = config.num_value_bins
     self.value_weight = config.value_weight
-    self.optimizer = torch.optim.Adam([self.model['weights']], lr=config.lr)
+    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.lr)
 
   def value_loss(self, value_logits: torch.Tensor, value_targets: float) -> torch.Tensor:
     """Calculate the categorical cross-entropy loss for value prediction.
@@ -68,7 +68,7 @@ class Network:
   def _compute_loss(self, batch):
     loss = torch.tensor(0.0, requires_grad=True)
     for observations, actions, value_targets in batch:
-      network_output = self.forward(self.model, observations, actions)
+      network_output = self.forward(observations, actions)
       # Policy loss
       policy_loss = F.cross_entropy(
           network_output.policy_logits, actions
@@ -80,14 +80,34 @@ class Network:
     return loss
 
   def forward(
-      self, params: Params, observation: torch.Tensor, action: torch.Tensor
+      self, observation: torch.Tensor, action: torch.Tensor
   ) -> NetworkTrainingOutput:
-    # Predict value logits and policy logits from given observation and action.
-    # observation and action are passed to the network.
-    value_logits = torch.zeros(self.num_value_bins)
-    policy_logits = torch.tensor([0.0])
+    """Forward pass through the model for training.
+
+    Args:
+      observation: Tokenized observation tensor, shape (seq_len,)
+      action: Tokenized action tensor, shape (seq_len,)
+
+    Returns:
+      NetworkTrainingOutput with value_logits and policy_logits
+    """
+    # Add batch dimension: (seq_len,) -> (1, seq_len)
+    obs_batch = observation.unsqueeze(0)
+    action_batch = action.unsqueeze(0)
+
+    # Forward through model
+    model_output = self.model(
+        input_ids=obs_batch,
+        decoder_input_ids=action_batch
+    )
+
+    # Extract and remove batch dimension
+    value_logits = model_output['value_logits'].squeeze(0)  # (1, num_bins) -> (num_bins,)
+    policy_logits = model_output['policy_logits'].squeeze(0)  # (1, seq_len, vocab) -> (seq_len, vocab)
+
     return NetworkTrainingOutput(
-        value_logits=value_logits, policy_logits=policy_logits
+        value_logits=value_logits,
+        policy_logits=policy_logits
     )
 
   def sample(self, observation: str) -> NetworkSamplingOutput:
