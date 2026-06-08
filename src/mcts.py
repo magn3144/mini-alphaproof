@@ -105,32 +105,52 @@ def expand_node(
       continue
     # Immediately apply the actions in the environment.
     try:
-      state = environment.step(node.state_id, action)
+      states = environment.step(node.state_id, action)
     except ValueError:
       # Invalid action encountered.
       continue
     else:
-      node.children[action] = Node(
-          observation=state.observation,
-          action=action,
-          prior=p,
-          state_id=state.id,
-          to_play=Player.AND if state.num_goals > 1 else Player.OR,
-          is_optimal=state.terminal,
-          is_terminal=state.terminal,
-          reward=state.reward,
-      )
-      node.is_optimal |= state.terminal
-      if state.num_goals > 1:
-        # For AND nodes, immediately add children with pseudo-actions to focus
-        # on each goal.
-        expand_node(
-            node.children[action],
-            {f'focus_goal {i}': math.log(1./state.num_goals)
-             for i in range(state.num_goals)},
-            environment,
-            temperature,
+      if not states:
+        continue
+      if len(states) == 1:
+        state = states[0]
+        node.children[action] = Node(
+            observation=state.observation if state.observation is not None else "",
+            action=action,
+            prior=p,
+            state_id=state.id,
+            to_play=Player.OR,
+            is_optimal=state.terminal,
+            is_terminal=state.terminal,
+            reward=state.reward,
         )
+        node.is_optimal |= state.terminal
+      else:
+        and_node = Node(
+            observation="",
+            action=action,
+            prior=p,
+            state_id=node.state_id,
+            to_play=Player.AND,
+            is_optimal=False,
+            is_terminal=False,
+            reward=0.0,
+        )
+        node.children[action] = and_node
+        for i, state in enumerate(states):
+          and_node.children[f'subgoal {i}'] = Node(
+              observation=state.observation if state.observation is not None else "",
+              action=f'subgoal {i}',
+              prior=1.0 / len(states),
+              state_id=state.id,
+              to_play=Player.OR,
+              is_optimal=state.terminal,
+              is_terminal=state.terminal,
+              reward=state.reward,
+          )
+        if all(child.is_optimal for child in and_node.children.values()):
+          and_node.is_optimal = True
+        node.is_optimal |= and_node.is_optimal
 
 
 def backprop_value_towards_min(node):

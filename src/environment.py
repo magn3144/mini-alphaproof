@@ -168,7 +168,7 @@ class Node:
 
     self.visit_count = 0
     self.evaluations = 0
-    self.value_sum = 0
+    self.value_sum = 0.0
     self.children: dict[Action, Node] = {}
 
     # Not used in search, but used as a regression target in RL.
