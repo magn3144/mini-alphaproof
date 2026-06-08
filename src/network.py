@@ -24,7 +24,12 @@ class NetworkSamplingOutput(typing.NamedTuple):
 
 class Network:
   def __init__(self, config: Config):
-    self.model = None
+    from transformers import AutoModelForSeq2SeqLM
+    from src.build_network import TwoHeadedEncoderDecoder
+
+    model_name = getattr(config, 'model_name', "google/t5-v1_1-small")
+    encoder_decoder = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    self.model = TwoHeadedEncoderDecoder(encoder_decoder, config.num_value_bins)
 
     self.num_value_bins = config.num_value_bins
     self.value_weight = config.value_weight

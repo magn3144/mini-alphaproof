@@ -5,7 +5,7 @@
 import math
 from typing import Dict, List
 
-from ap_types import Config, Node, Game, Player, Action, Observation
+from environment import Config, Node, Game, Player, Action, Observation
 from src.environment import Environment
 from src.training import Network
 
