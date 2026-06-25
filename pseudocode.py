@@ -126,7 +126,7 @@ class Node:
       observation: Observation,
       prior: float,
       state_id: int,
-      to_play: Player,
+      and_or: Player,
       reward: float,
       is_optimal: bool = False,
       is_terminal: bool = False,
@@ -139,7 +139,7 @@ class Node:
     # Environment state ID after the action has been applied.
     self.state_id = state_id
     # Whether the node is an OR or AND node.
-    self.to_play = to_play
+    self.and_or = and_or
     # Whether the action closed the proof of the previous goal.
     self.is_terminal = is_terminal
     # Whether the node is part of an optimal path.
@@ -188,7 +188,7 @@ class Game:
         observation='',
         prior=1.0,
         state_id=0,
-        to_play=Player.OR,
+        and_or=Player.OR,
         reward=0.0,
     )
 
@@ -198,31 +198,31 @@ def compute_value_target(node: Node) -> float:
   if node.is_terminal:
     node.value_target = 0
     return 0
-  elif node.to_play == Player.OR:
+  elif node.and_or == Player.OR:
     action = select_optimal_action(node)
     child_value = compute_value_target(node.children[action])
     value = -1 + child_value
     node.value_target = value
     return value
-  elif node.to_play == Player.AND:
+  elif node.and_or == Player.AND:
     value = min(compute_value_target(child) for child in node.children.values())
     node.value_target = value
     return value
   else:
-    raise ValueError(f'Unknown to_play: {node.to_play}')
+    raise ValueError(f'Unknown to_play: {node.and_or}')
 
 
 def extract_transitions(node: Node) -> list[tuple[Observation, Action, float]]:
   """Extracts transitions from the game."""
   if not node.is_optimal:
     return []
-  assert node.to_play == Player.OR
+  assert node.and_or == Player.OR
   transitions = []
-  while node.to_play == Player.OR and not node.is_terminal:
+  while node.and_or == Player.OR and not node.is_terminal:
     action = select_optimal_action(node)
     transitions.append((node.observation, action, node.value_target))
     node = node.children[action]
-  if node.to_play == Player.AND:
+  if node.and_or == Player.AND:
     for _, child in node.children.items():
       transitions.extend(extract_transitions(child))
   return transitions
@@ -230,7 +230,7 @@ def extract_transitions(node: Node) -> list[tuple[Observation, Action, float]]:
 
 def select_optimal_action(node: Node) -> Action:
   """Selects the optimal action from the node."""
-  assert node.to_play == Player.OR
+  assert node.and_or == Player.OR
   [(action, _)] = [
       (action, child)
       for action, child in node.children.items()
@@ -518,13 +518,13 @@ def play_game(config: Config, network: Network, matchmaker: Matchmaker) -> Game:
       action=None,
       observation=state.observation,
       prior=1.0,
-      to_play=Player.OR,
+      and_or=Player.OR,
       state_id=state.id,
       is_optimal=state.terminal,
       is_terminal=state.terminal,
       reward=state.reward,
   )
-  assert game.root.to_play == Player.OR
+  assert game.root.and_or == Player.OR
 
   # Run Monte Carlo tree search to find a proof.
   run_mcts(config, game, network, environment)
@@ -573,7 +573,7 @@ def run_mcts(
 def progressive_sample(node: Node, config: Config) -> bool:
   """Whether to expand a node in the search tree again (progressive sampling)."""
   return (
-      node.to_play == Player.OR
+      node.and_or == Player.OR
       and node.evaluations <= config.ps_c * node.visit_count**config.ps_alpha
   )
 
@@ -605,7 +605,7 @@ def ucb_score(config: Config, parent: Node, child: Node) -> float:
   else:
     value_score = 0
 
-  if parent.to_play == Player.AND:
+  if parent.and_or == Player.AND:
     # Invert value score for AND nodes.
     value_score = 1 - value_score
     if child.is_optimal:
@@ -645,7 +645,7 @@ def expand_node(
           action=action,
           prior=p,
           state_id=state.id,
-          to_play=Player.AND if state.num_goals > 1 else Player.OR,
+          and_or=Player.AND if state.num_goals > 1 else Player.OR,
           is_optimal=state.terminal,
           is_terminal=state.terminal,
           reward=state.reward,
@@ -686,12 +686,12 @@ def backpropagate(
   for ix, node in reversed(list(enumerate(search_path))):
     node.value_sum += value
     node.visit_count += 1
-    if node.to_play == Player.AND:
+    if node.and_or == Player.AND:
       is_optimal = all(child.is_optimal for child in node.children.values())
     else:
       is_optimal |= node.is_optimal
     node.is_optimal = is_optimal
-    if ix > 0 and search_path[ix - 1].to_play == Player.AND:
+    if ix > 0 and search_path[ix - 1].and_or == Player.AND:
       value = backprop_value_towards_min(search_path[ix - 1])
     else:
       value = node.reward + value

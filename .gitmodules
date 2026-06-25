@@ -1,0 +1,3 @@
+[submodule "vendor/leantree"]
+	path = vendor/leantree
+	url = https://github.com/Kripner/leantree.git
