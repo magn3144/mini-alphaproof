@@ -10,7 +10,7 @@ Observation = LeanProofState
 
 # Actions in AlphaProof are Lean tactics (except for special actions, to start a
 # disproof, or to focus on a goal).
-Action = LeanTactic
+Action = LeanTactic | str
 
 Theorem = str
 
@@ -84,6 +84,37 @@ class Environment:
             num_goals=len(observation.goals),
         )
 
+    def _state_from_branches(self, branches: list[Any], reward: float = 0.0) -> State:
+        """Store LeanTree's factorized branches as one AlphaProof state."""
+        if not branches:
+            state_id = self.get_next_state_id()
+            self._branches[state_id] = None
+            return State(
+                id=state_id,
+                reward=reward,
+                observation=LeanProofState([]),
+                terminal=True,
+                num_goals=0,
+            )
+
+        if len(branches) == 1:
+            return self._state_from_branch(branches[0], reward=reward)
+
+        state_id = self.get_next_state_id()
+        self._branches[state_id] = branches
+        observation = LeanProofState([
+            goal
+            for branch in branches
+            for goal in branch.state.goals
+        ])
+        return State(
+            id=state_id,
+            reward=reward,
+            observation=observation,
+            terminal=False,
+            num_goals=len(branches),
+        )
+
     def initial_state(self, theorem: Theorem) -> State:
         """Returns the initial tactic state."""
         self._send_imports()
@@ -92,7 +123,35 @@ class Environment:
 
     def step(self, state_id: int, action: Action) -> State:
         """Applies the action in the given state, returns the new state."""
-        raise NotImplementedError()
+        if state_id not in self._branches:
+            raise ValueError(f'Unknown state id: {state_id}')
+
+        branch = self._branches[state_id]
+        tactic = action.tactic if isinstance(action, LeanTactic) else action
+
+        if tactic.startswith('focus_goal '):
+            branches = branch
+            if not isinstance(branches, list):
+                raise ValueError('Can only focus a state with multiple goals.')
+            try:
+                goal_index = int(tactic.removeprefix('focus_goal ').strip())
+            except ValueError as exc:
+                raise ValueError(f'Invalid focus action: {tactic}') from exc
+            try:
+                return self._state_from_branch(branches[goal_index])
+            except IndexError as exc:
+                raise ValueError(f'Goal index out of range: {goal_index}') from exc
+
+        if branch is None:
+            raise ValueError('Cannot apply a tactic to a terminal state.')
+        if isinstance(branch, list):
+            raise ValueError('Use focus_goal <i> before applying a tactic.')
+
+        try:
+            branches = branch.apply_tactic(action)
+        except Exception as exc:
+            raise ValueError(f'Invalid tactic {tactic!r}: {exc}') from exc
+        return self._state_from_branches(branches)
 
 
 class Config:
