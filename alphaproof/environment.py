@@ -2,6 +2,7 @@ import typing
 from typing import Any, Callable, List, Dict
 import enum
 
+from alphaproof.helper import negate_theorem
 from leantree import LeanProject, LeanTactic, LeanProofState
 
 
@@ -46,6 +47,7 @@ class Environment:
         self._sent_imports = False
         self._next_state_id = -1
         self._branches: dict[int, Any] = {}
+        self._theorems: dict[int, Theorem] = {}
 
     def close(self) -> None:
         """Stop the underlying Lean process."""
@@ -69,10 +71,17 @@ class Environment:
             self._env.send_command(f'import {module}')
         self._sent_imports = True
 
-    def _state_from_branch(self, branch: Any, reward: float = 0.0) -> State:
+    def _state_from_branch(
+        self,
+        branch: Any,
+        reward: float = 0.0,
+        theorem: Theorem | None = None,
+    ) -> State:
         """Store a LeanTree proof branch and expose it as an AlphaProof state."""
         state_id = self.get_next_state_id()
         self._branches[state_id] = branch
+        if theorem is not None:
+            self._theorems[state_id] = theorem
 
         observation = branch.state
         terminal = observation.is_solved()
@@ -119,7 +128,7 @@ class Environment:
         """Returns the initial tactic state."""
         self._send_imports()
         branch = self._env.proof_from_sorry(theorem)
-        return self._state_from_branch(branch)
+        return self._state_from_branch(branch, theorem=theorem)
 
     def step(self, state_id: int, action: Action) -> State:
         """Applies the action in the given state, returns the new state."""
@@ -128,6 +137,13 @@ class Environment:
 
         branch = self._branches[state_id]
         tactic = action.tactic if isinstance(action, LeanTactic) else action
+
+        if tactic == 'disprove':
+            if state_id not in self._theorems:
+                raise ValueError('Can only disprove from an initial theorem state.')
+            theorem = negate_theorem(self._theorems[state_id])
+            branch = self._env.proof_from_sorry(theorem)
+            return self._state_from_branch(branch, theorem=theorem)
 
         if tactic.startswith('focus_goal '):
             branches = branch

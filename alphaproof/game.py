@@ -1,4 +1,13 @@
+import subprocess
+import tempfile
+from pathlib import Path
+
+from alphaproof.helper import replace_sorry_proof, theorem_for_game, theorem_name
 from alphaproof.environment import Action, Node, NodeType, Observation, Theorem
+from leantree import LeanTactic
+
+
+LEAN_PROJECT_DIR = Path('lean_project')
 
 
 class Game:
@@ -70,7 +79,91 @@ def select_optimal_action(node: Node) -> Action:
 
 def final_check(game: Game) -> bool:
     """Checks that the proof found is actually valid."""
-    # Extract tactics from the tree, write the statement and its proof to a file,
-    # add a footer checking the axioms, and then run the `lean` binary.
-    # Properly handle the case where we attempt to disprove a theorem.
-    return True
+    theorem = theorem_for_game(game.theorem, game.disprove)
+    try:
+        proof_lines = extract_proof_script(game.root)
+        lean_code = build_lean_check(theorem, proof_lines)
+        return run_lean_check(lean_code)
+    except Exception:
+        return False
+
+
+def extract_proof_script(node: Node, indent: int = 2) -> list[str]:
+    """Extract a Lean tactic script from the optimal proof tree."""
+    if node.is_terminal:
+        return []
+
+    if node.node_type == NodeType.OR:
+        action = select_optimal_action(node)
+        tactic = action_to_tactic(action)
+        child = node.children[action]
+
+        if _is_internal_action(tactic):
+            return extract_proof_script(child, indent)
+        return [
+                _indent(tactic, indent),
+                *extract_proof_script(child, indent),
+        ]
+
+    if node.node_type == NodeType.AND:
+        lines = []
+        for child in node.children.values():
+            lines.append(' ' * indent + '·')
+            lines.extend(extract_proof_script(child, indent + 2))
+        return lines
+
+    raise ValueError(f'Unknown node type: {node.node_type}')
+
+
+def action_to_tactic(action: Action) -> str:
+    """Convert an AlphaProof action into tactic text."""
+    if isinstance(action, LeanTactic):
+        return action.tactic
+    return action
+
+
+def build_lean_check(theorem: Theorem, proof_lines: list[str]) -> str:
+    """Build the Lean file used for final proof checking."""
+    declaration = replace_sorry_proof(theorem, proof_lines)
+    footer = ''
+    name = theorem_name(declaration)
+    if name is not None:
+        footer = f'\n\n#print axioms {name}'
+    return f'import Mathlib\nset_option warningAsError true\n\n{declaration}{footer}\n'
+
+
+def run_lean_check(lean_code: str) -> bool:
+    """Run Lean on generated code and reject sorry-backed proofs."""
+    LEAN_PROJECT_DIR.mkdir(exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        'w',
+        dir=LEAN_PROJECT_DIR,
+        suffix='.lean',
+        prefix='AlphaProofFinalCheck',
+        delete=False,
+    ) as file:
+        file.write(lean_code)
+        file_path = Path(file.name)
+
+    try:
+        result = subprocess.run(
+                ['lake', 'env', 'lean', file_path.name],
+                cwd=LEAN_PROJECT_DIR,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+        )
+    finally:
+        file_path.unlink(missing_ok=True)
+
+    return result.returncode == 0
+
+
+def _indent(text: str, spaces: int) -> str:
+    prefix = ' ' * spaces
+    return '\n'.join(prefix + line if line else line for line in text.splitlines())
+
+
+def _is_internal_action(tactic: str) -> bool:
+    return tactic == 'disprove' or tactic.startswith('focus_goal ')
