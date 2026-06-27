@@ -163,7 +163,9 @@ class Config:
         batch_size: int,
         num_actors: int,
         lr: float,
-        environment_ctor: Callable[[], Environment] = lambda: Environment(),
+        environment_ctor: Callable[[], Environment] = (
+            lambda: Environment(LeanProject('lean_project'))
+        ),
     ):
         """Populate acting, search, training, and matchmaker settings."""
         ### Acting
@@ -227,7 +229,7 @@ class Node:
         # Environment state ID after the action has been applied.
         self.state_id = state_id
         # Whether the node is an OR or AND node.
-        self.and_or = and_or
+        self.node_type = and_or
         # Whether the action closed the proof of the previous goal.
         self.is_terminal = is_terminal
         # Whether the node is part of an optimal path.
@@ -243,7 +245,7 @@ class Node:
         self.children: dict[Action, Node] = {}
 
         # Not used in search, but used as a regression target in RL.
-        self.value_target = 0
+        self.value_target: float = 0.0
 
     def expanded(self) -> bool:
         """Return whether this node has children."""
