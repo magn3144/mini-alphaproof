@@ -3,11 +3,66 @@ import tempfile
 from pathlib import Path
 
 from alphaproof.helper import replace_sorry_proof, theorem_for_game, theorem_name
-from alphaproof.environment import Action, Node, NodeType, Observation, Theorem
+from alphaproof.environment import Action, NodeType, Observation, Theorem
 from leantree import LeanTactic
 
 
 LEAN_PROJECT_DIR = Path('lean_project')
+
+
+class Node:
+    """Node in the search tree."""
+
+    def __init__(
+        self,
+        action: Action | None,
+        observation: Observation,
+        prior: float,
+        state_id: int,
+        and_or: NodeType,
+        reward: float,
+        is_optimal: bool = False,
+        is_terminal: bool = False,
+    ):
+        """Initialize a search node reached by an optional incoming action."""
+        # Action that was taken to reach this node.
+        self.action = action
+        # Observation after the action has been applied.
+        self.observation = observation
+        # Environment state ID after the action has been applied.
+        self.state_id = state_id
+        # Whether the node is an OR or AND node.
+        self.node_type = and_or
+        # Whether the action closed the proof of the previous goal.
+        self.is_terminal = is_terminal
+        # Whether the node is part of an optimal path.
+        self.is_optimal = is_optimal
+        # Per-step reward obtained after applying the action.
+        self.reward = reward
+        # Prior probability of the node according to the policy.
+        self.prior = prior
+
+        self.visit_count = 0
+        self.evaluations = 0
+        self.value_sum = 0
+        self.children: dict[Action, Node] = {}
+
+        # Not used in search, but used as a regression target in RL.
+        self.value_target: float = 0.0
+
+    def expanded(self) -> bool:
+        """Return whether this node has children."""
+        return len(self.children) > 0
+
+    def value(self) -> float:
+        """Return the average backed-up value."""
+        if self.visit_count == 0:
+            return 0
+        return self.value_sum / self.visit_count
+
+    def prior_sum(self) -> float:
+        """Return the sum of child policy priors."""
+        return sum(child.prior for child in self.children.values())
 
 
 class Game:
