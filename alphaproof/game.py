@@ -163,8 +163,8 @@ def extract_proof_script(node: Node, indent: int = 2) -> list[str]:
     if node.node_type == NodeType.AND:
         lines = []
         for child in node.children.values():
-            lines.append(' ' * indent + '·')
-            lines.extend(extract_proof_script(child, indent + 2))
+            child_lines = extract_proof_script(child, indent + 2)
+            lines.extend(_bullet_lines(child_lines, indent))
         return lines
 
     raise ValueError(f'Unknown node type: {node.node_type}')
@@ -218,6 +218,22 @@ def run_lean_check(lean_code: str) -> bool:
 def _indent(text: str, spaces: int) -> str:
     prefix = ' ' * spaces
     return '\n'.join(prefix + line if line else line for line in text.splitlines())
+
+
+def _bullet_lines(child_lines: list[str], indent: int) -> list[str]:
+    bullet = ' ' * indent + '·'
+    if not child_lines:
+        return [bullet]
+
+    first_line = child_lines[0]
+    child_indent = ' ' * (indent + 2)
+    if '\n' in first_line or not first_line.startswith(child_indent):
+        return [bullet, *child_lines]
+
+    return [
+            f'{bullet} {first_line.removeprefix(child_indent)}',
+            *child_lines[1:],
+    ]
 
 
 def _is_internal_action(tactic: str) -> bool:

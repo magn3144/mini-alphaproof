@@ -34,6 +34,8 @@ def replace_sorry_proof(theorem: str, proof_lines: list[str]) -> str:
     if theorem.count('sorry') != 1:
         raise ValueError('Expected theorem to contain exactly one sorry.')
     proof = '\n' + '\n'.join(proof_lines)
+    if ' sorry' in theorem:
+        return theorem.replace(' sorry', proof, 1)
     return theorem.replace('sorry', proof, 1)
 
 
