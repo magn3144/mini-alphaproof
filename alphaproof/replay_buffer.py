@@ -1,6 +1,7 @@
 import random
 from typing import Any
 
+from transformers import AutoTokenizer
 import torch
 
 from alphaproof.config import Config
@@ -16,6 +17,8 @@ class ReplayBuffer:
         self.batch_size = config.batch_size
         self.sequence_length = config.sequence_length
         self.buffer = []
+        self.tokenizer_model = config.tokenizer_model
+        self.tokenizer = self._load_tokenizer()
 
     def save_game(self, game: Game):
         """Add solved-game transitions to the replay window."""
@@ -38,9 +41,15 @@ class ReplayBuffer:
         return (tokenized_observation, tokenized_action, value)
 
     def tokenize(self, input_value: Any) -> torch.Tensor:
-        """Tokenize text as padded UTF-8 byte IDs."""
-        encoded = str(input_value).encode('utf-8')[:self.sequence_length]
-        tokens = torch.zeros(self.sequence_length, dtype=torch.int32)
-        if encoded:
-            tokens[:len(encoded)] = torch.tensor(list(encoded), dtype=torch.int32) + 1
-        return tokens
+        """Tokenize text with the CodeT5+ tokenizer."""
+        encoded = self.tokenizer(
+            str(input_value),
+            max_length=self.sequence_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt',
+        )
+        return encoded.input_ids.squeeze(0).long()
+
+    def _load_tokenizer(self):
+        return AutoTokenizer.from_pretrained(self.tokenizer_model)

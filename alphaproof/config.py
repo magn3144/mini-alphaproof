@@ -17,10 +17,12 @@ class Config:
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject('lean_project'))
         ),
+        tokenizer_model: str = 'Salesforce/codet5p-220m',
     ):
         """Populate acting, search, training, and matchmaker settings."""
         ### Acting
         self.environment_ctor = environment_ctor
+        self.tokenizer_model = tokenizer_model
         self.num_actors = num_actors
 
         self.num_simulations = num_simulations
