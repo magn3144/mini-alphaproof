@@ -90,7 +90,7 @@ class Environment:
             reward=reward,
             observation=observation,
             terminal=terminal,
-            num_goals=len(observation.goals),
+            num_goals=0 if terminal else 1,
         )
 
     def _state_from_branches(self, branches: list[Any], reward: float = 0.0) -> State:
