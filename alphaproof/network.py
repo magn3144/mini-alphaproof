@@ -1,17 +1,23 @@
 import typing
-from typing import Any, Dict
+from typing import Dict
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 from alphaproof.config import Config
 from alphaproof.environment import Action
 
 
-Params = Any
+Params = dict[str, torch.Tensor]
 
 
 class NetworkTrainingOutput(typing.NamedTuple):
     """Output of the network during training."""
-    value_logits: jax.Array
-    policy_logits: jax.Array
+    value_logits: torch.Tensor
+    policy_logits: torch.Tensor
+    policy_loss: torch.Tensor
 
 
 class NetworkSamplingOutput(typing.NamedTuple):
@@ -20,67 +26,229 @@ class NetworkSamplingOutput(typing.NamedTuple):
     value: float
 
 
-class Network:
-    """Placeholder neural network used by the training pseudocode."""
+class Network(nn.Module):
+    """CodeT5+ policy and value network used by the training loop."""
 
     def __init__(self, config: Config):
-        """Initialize parameters, optimizer state, and loss closure."""
-        self.params = {'weights': jnp.array([0])}
+        """Initialize the model, value head, and optimizer."""
+        super().__init__()
 
         self.num_value_bins = config.num_value_bins
         self.value_weight = config.value_weight
-        self.optimizer = optax.adam(config.lr)
-        self.opt_state = self.optimizer.init(self.params)
+        self.sequence_length = config.sequence_length
+        self.device: torch.device = torch.device(
+            'cuda' if torch.cuda.is_available() else 'cpu'
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_model)
+        self.num_sampled_actions = 8
+        self.model = T5ForConditionalGeneration.from_pretrained(
+            config.tokenizer_model
+        )
+        self.value_head = nn.Linear(
+            self.model.config.d_model,
+            self.num_value_bins,
+        )
 
-        def _loss_fn(params, batch):
-            """Compute policy and value loss over a replay batch."""
-            loss = 0
-            for observations, actions, value_targets in batch:
-                network_output = self.forward(params, observations, actions)
-                # Policy loss
-                loss += jnp.mean(
-                    optax.softmax_cross_entropy_with_integer_labels(
-                        network_output.policy_logits, actions
-                    )
-                )
-                # Value loss
-                loss += self.value_weight * value_loss(
-                    network_output.value_logits,
-                    value_targets,
-                )
+        self.value_bins: torch.Tensor
+        value_bins = torch.linspace(
+            -float(self.num_value_bins - 1),
+            0.0,
+            steps=self.num_value_bins,
+        )
+        self.register_buffer('value_bins', value_bins)
+        self.to(self.device)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=config.lr)
 
-            return loss
+    @property
+    def params(self) -> Params:
+        """Return a PyTorch checkpoint compatible with shared storage."""
+        return {
+            name: value.detach().cpu().clone()
+            for name, value in self.state_dict().items()
+        }
 
-        self._loss_grad = jax.grad(_loss_fn)
+    @params.setter
+    def params(self, params: Params):
+        """Load a PyTorch checkpoint from shared storage."""
+        self.load_state_dict(params)
+
+    def _loss_fn(
+        self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]
+    ) -> torch.Tensor:
+        """Compute policy and value loss over a replay batch."""
+        if not batch:
+            raise ValueError('Cannot compute network loss for an empty batch.')
+
+        observations = torch.stack(
+            [observation for observation, _, _ in batch]
+        ).to(self.device)
+        actions = torch.stack([action for _, action, _ in batch]).to(
+            self.device
+        )
+        value_targets = torch.tensor(
+            [value_target for _, _, value_target in batch],
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        network_output = self.forward(observations, actions)
+        return (
+            network_output.policy_loss
+            + self.value_weight
+            * self.value_loss(network_output.value_logits, value_targets)
+        )
+
+    def value_loss(
+        self, value_logits: torch.Tensor, value_targets: float | torch.Tensor
+    ) -> torch.Tensor:
+        """Calculate categorical value loss with linear interpolation bins."""
+        value_bins = self.value_bins.to(
+            device=value_logits.device,
+            dtype=value_logits.dtype,
+        )
+        targets = torch.as_tensor(
+            value_targets,
+            dtype=value_logits.dtype,
+            device=value_logits.device,
+        )
+        targets = targets.clamp(value_bins[0], value_bins[-1])
+        lower_index = torch.searchsorted(value_bins, targets, right=True) - 1
+        lower_index = lower_index.clamp(0, self.num_value_bins - 1)
+        upper_index = (lower_index + 1).clamp(0, self.num_value_bins - 1)
+
+        lower_bin = value_bins[lower_index]
+        upper_bin = value_bins[upper_index]
+        upper_weight = torch.where(
+            upper_bin == lower_bin,
+            torch.zeros_like(targets),
+            (targets - lower_bin) / (upper_bin - lower_bin),
+        )
+        lower_weight = 1.0 - upper_weight
+
+        target_distribution = torch.zeros_like(value_logits)
+        target_distribution.scatter_add_(
+            -1,
+            lower_index.reshape(target_distribution.shape[:-1] + (1,)),
+            lower_weight.reshape(target_distribution.shape[:-1] + (1,)),
+        )
+        target_distribution.scatter_add_(
+            -1,
+            upper_index.reshape(target_distribution.shape[:-1] + (1,)),
+            upper_weight.reshape(target_distribution.shape[:-1] + (1,)),
+        )
+
+        log_probs = F.log_softmax(value_logits, dim=-1)
+        return -(target_distribution * log_probs).sum(dim=-1).mean()
 
     def forward(
-        self, params: Params, observation: jax.Array, action: jax.Array
+        self, observation: torch.Tensor, action: torch.Tensor
     ) -> NetworkTrainingOutput:
-        """Run the placeholder network for supervised training."""
-        # Predict value logits and policy logits from given observation and action.
-        # observation and action are passed to the network.
-        value_logits = jnp.zeros(self.num_value_bins)
-        policy_logits = jnp.array([0])
+        """Run the network for supervised tactic and value training."""
+        observation = self._ensure_batch(observation).to(self.device)
+        action = self._ensure_batch(action).to(self.device)
+        labels = action.clone()
+
+        pad_token_id = self.model.config.pad_token_id
+        attention_mask = None
+        if pad_token_id is not None:
+            attention_mask = observation.ne(pad_token_id).long()
+            labels = labels.masked_fill(labels == pad_token_id, -100)
+
+        outputs = self.model(
+            input_ids=observation,
+            attention_mask=attention_mask,
+            labels=labels,
+            return_dict=True,
+        )
+        if outputs.loss is None:
+            raise ValueError('Expected model output to include policy loss.')
+        if outputs.encoder_last_hidden_state is None:
+            raise ValueError(
+                'Expected model output to include encoder hidden states.'
+            )
+
+        value_logits = self.value_head(outputs.encoder_last_hidden_state[:, 0])
         return NetworkTrainingOutput(
-            value_logits=value_logits, policy_logits=policy_logits
+            value_logits=value_logits,
+            policy_logits=outputs.logits,
+            policy_loss=outputs.loss,
         )
 
     def sample(self, observation: str) -> NetworkSamplingOutput:
         """Return sampled tactics and a value estimate for search."""
-        # Predict value and sample actions from a given observation.
-        # observation is tokenized and passed to the network to produce value
-        # logits. The value is then calcualated from value logits and bin locations.
-        value = 0.
+        self.eval()
+        encoded = self.tokenizer(
+            observation,
+            max_length=self.sequence_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt',
+        )
+        input_ids = encoded.input_ids.to(self.device)
+        attention_mask = encoded.attention_mask.to(self.device)
+
+        with torch.no_grad():
+            generated = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=self.sequence_length,
+                num_return_sequences=self.num_sampled_actions,
+                do_sample=True,
+                output_scores=True,
+                return_dict_in_generate=True,
+            )
+            generated = typing.cast(typing.Any, generated)
+            if generated.scores is None:
+                raise ValueError('Expected generation output to include scores.')
+
+            encoder_outputs = self.model.get_encoder()(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+            value_logits = self.value_head(
+                encoder_outputs.last_hidden_state[:, 0]
+            )
+            value_probs = torch.softmax(value_logits, dim=-1)
+            value = (value_probs * self.value_bins).sum(dim=-1).item()
+
+            # The summed logprobs are calcualted and later used in the PUCT formula
+            transition_scores = self.model.compute_transition_scores(
+                generated.sequences,
+                generated.scores,
+                normalize_logits=True,
+            )
+            logprobs = transition_scores.sum(dim=-1).tolist()
+
+        actions = self.tokenizer.batch_decode(
+            generated.sequences,
+            skip_special_tokens=True,
+        )
+        action_logprobs: Dict[Action, float] = {}
+        for action, logprob in zip(actions, logprobs):
+            action_logprobs[action] = max(
+                logprob,
+                action_logprobs.get(action, float('-inf')),
+            )
+
         return NetworkSamplingOutput(
-            action_logprobs={'placeholder_action': -2.},
+            action_logprobs=action_logprobs,
             value=value,
         )
 
-    def update(self, batch: list[tuple[jax.Array, jax.Array, float]]):
+    def update(
+        self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]
+    ) -> float:
         """Apply one optimizer update from a replay batch."""
-        # Update the network weights.
-        grads = self._loss_grad(self.params, batch)
-        updates, self.opt_state = self.optimizer.update(
-            grads, self.opt_state, self.params
-        )
-        self.params = optax.apply_updates(self.params, updates)
+        self.train()
+        loss = self._loss_fn(batch)
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        self.optimizer.step()
+        return loss.detach().item()
+
+    def _ensure_batch(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Add a batch dimension to a single token sequence."""
+        if tokens.dim() == 1:
+            return tokens.unsqueeze(0)
+        return tokens
