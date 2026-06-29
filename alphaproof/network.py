@@ -167,7 +167,11 @@ class Network(nn.Module):
                 'Expected model output to include encoder hidden states.'
             )
 
-        value_logits = self.value_head(outputs.encoder_last_hidden_state[:, 0])
+        pooled_state = self._mean_pool_encoder_state(
+            outputs.encoder_last_hidden_state,
+            attention_mask,
+        )
+        value_logits = self.value_head(pooled_state)
         return NetworkTrainingOutput(
             value_logits=value_logits,
             policy_logits=outputs.logits,
@@ -188,8 +192,13 @@ class Network(nn.Module):
         attention_mask = encoded.attention_mask.to(self.device)
 
         with torch.no_grad():
-            generated = self.model.generate(
+            encoder_outputs = self.model.get_encoder()(
                 input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+            generated = self.model.generate(
+                encoder_outputs=encoder_outputs,
                 attention_mask=attention_mask,
                 max_length=self.sequence_length,
                 num_return_sequences=self.num_sampled_actions,
@@ -201,14 +210,11 @@ class Network(nn.Module):
             if generated.scores is None:
                 raise ValueError('Expected generation output to include scores.')
 
-            encoder_outputs = self.model.get_encoder()(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                return_dict=True,
+            pooled_state = self._mean_pool_encoder_state(
+                encoder_outputs.last_hidden_state,
+                attention_mask,
             )
-            value_logits = self.value_head(
-                encoder_outputs.last_hidden_state[:, 0]
-            )
+            value_logits = self.value_head(pooled_state)
             value_probs = torch.softmax(value_logits, dim=-1)
             value = (value_probs * self.value_bins).sum(dim=-1).item()
 
@@ -252,3 +258,18 @@ class Network(nn.Module):
         if tokens.dim() == 1:
             return tokens.unsqueeze(0)
         return tokens
+
+    def _mean_pool_encoder_state(
+        self,
+        hidden_state: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Mean-pool encoder states over non-padding tokens."""
+        if attention_mask is None:
+            return hidden_state.mean(dim=1)
+
+        mask = attention_mask.to(
+            device=hidden_state.device,
+            dtype=hidden_state.dtype,
+        ).unsqueeze(-1)
+        return (hidden_state * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
