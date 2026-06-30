@@ -1,5 +1,7 @@
 import re
 
+from alphaproof.config import Config
+
 
 _PROOF_SEPARATOR = ':= by sorry'
 
@@ -76,3 +78,20 @@ def _rename_decl(header: str) -> str:
         return header
     prefix, name, rest = match.groups()
     return f'{prefix}{name}_disproof{rest}'
+
+
+def make_config() -> 'Config':
+    """Create the default pseudocode training configuration."""
+    from alphaproof.config import Config
+
+    return Config(
+            num_simulations=800,
+            batch_size=2048,
+            num_actors=3000,
+            lr=1.0,
+    )
+
+
+def launch_job(f, *args):
+    """Launch a worker job in the pseudocode runtime."""
+    f(*args)

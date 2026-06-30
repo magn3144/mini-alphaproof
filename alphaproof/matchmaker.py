@@ -113,7 +113,13 @@ class Matchmaker:
 
     def compute_num_simulations(self, theorem: Theorem, stats: Stats) -> int:
         """Compute number of simulations to run for a theorem."""
-        return 1000
+        recent_attempts = stats.attempts[-self.config.mm_trust_count :]
+        failures = sum(not success for _, success in recent_attempts)
+        num_simulations = int(
+                self.config.num_simulations
+                * self.config.mm_simulation_failure_multiplier ** failures
+        )
+        return min(num_simulations, self.config.mm_max_num_simulations)
 
     def get_start_position(self) -> Game:
         """Get a start position for a new game to be played."""
