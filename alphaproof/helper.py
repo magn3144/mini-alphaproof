@@ -1,6 +1,8 @@
 import re
+from typing import TYPE_CHECKING
 
-from alphaproof.config import Config
+if TYPE_CHECKING:
+    from alphaproof.config import Config
 
 
 _PROOF_SEPARATOR = ':= by sorry'
@@ -90,8 +92,3 @@ def make_config() -> 'Config':
             num_actors=3000,
             lr=1.0,
     )
-
-
-def launch_job(f, *args):
-    """Launch a worker job in the pseudocode runtime."""
-    f(*args)

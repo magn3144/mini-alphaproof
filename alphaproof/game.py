@@ -19,7 +19,7 @@ class Node:
         observation: Observation,
         prior: float,
         state_id: int,
-        and_or: NodeType,
+        node_type: NodeType,
         reward: float,
         is_optimal: bool = False,
         is_terminal: bool = False,
@@ -32,7 +32,7 @@ class Node:
         # Environment state ID after the action has been applied.
         self.state_id = state_id
         # Whether the node is an OR or AND node.
-        self.node_type = and_or
+        self.node_type = node_type
         # Whether the action closed the proof of the previous goal.
         self.is_terminal = is_terminal
         # Whether the node is part of an optimal path.
@@ -42,9 +42,9 @@ class Node:
         # Prior probability of the node according to the policy.
         self.prior = prior
 
-        self.visit_count = 0
-        self.evaluations = 0
-        self.value_sum = 0
+        self.visit_count: int = 0
+        self.evaluations: int = 0
+        self.value_sum: float = 0.0
         self.children: dict[Action, Node] = {}
 
         # Not used in search, but used as a regression target in RL.
@@ -81,7 +81,7 @@ class Game:
                 observation=Observation([]),
                 prior=1.0,
                 state_id=0,
-                and_or=NodeType.OR,
+                node_type=NodeType.OR,
                 reward=0.0,
         )
 
