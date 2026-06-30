@@ -13,11 +13,16 @@ from alphaproof.shared_storage import SharedStorage
 # Each acting job is independent of all others; it takes the latest network
 # snapshot, produces a game and makes it available to the learner by
 # writing it to a shared replay buffer.
-def run_actor(config: Config, storage: SharedStorage,
-                            replay_buffer: ReplayBuffer, matchmaker: Matchmaker):
-    """Continuously generate solved games from the latest checkpoint."""
+def run_actor(
+        config: Config,
+        storage: SharedStorage,
+        replay_buffer: ReplayBuffer,
+        matchmaker: Matchmaker,
+        num_games: int,
+):
+    """Generate solved games from the latest checkpoint."""
     network = Network(config)
-    while True:
+    for _ in range(num_games):
         network.params = storage.latest_params()
         game = play_game(config, network, matchmaker)
         if game.root.is_optimal:

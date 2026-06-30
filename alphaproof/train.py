@@ -13,6 +13,11 @@ def train_network(
 ):
     """Train the network from replay and checkpoint parameters."""
     network = Network(config)
+    network.params = storage.latest_params()
+
+    if len(replay_buffer) == 0:
+        print('Warning: replay buffer is empty; skipping network training.')
+        return
 
     for i in range(config.training_steps):
         if i % config.checkpoint_interval == 0:
@@ -38,8 +43,18 @@ def alphaproof_train(config: Config) -> Network:
     replay_buffer = ReplayBuffer(config)
     matchmaker = Matchmaker(config)
 
+    network = Network(config)
+    storage.save_params(0, network.params)
+
     for _ in range(config.num_actors):
-        launch_job(run_actor, config, storage, replay_buffer, matchmaker)
+        launch_job(
+                run_actor,
+                config,
+                storage,
+                replay_buffer,
+                matchmaker,
+                config.num_games,
+        )
 
     train_network(config, storage, replay_buffer)
 

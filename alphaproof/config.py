@@ -13,6 +13,7 @@ class Config:
         num_simulations: int,
         batch_size: int,
         num_actors: int,
+        num_games: int,
         lr: float,
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject('lean_project'))
@@ -24,7 +25,7 @@ class Config:
         self.environment_ctor = environment_ctor
         self.tokenizer_model = tokenizer_model
         self.num_actors = num_actors
-
+        self.num_games = num_games
         self.num_simulations = num_simulations
 
         # UCB formula

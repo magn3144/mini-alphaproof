@@ -26,6 +26,10 @@ class ReplayBuffer:
         self.buffer.extend(transitions)
         self.buffer = self.buffer[-self.window_size:]
 
+    def __len__(self) -> int:
+        """Return the number of replay transitions."""
+        return len(self.buffer)
+
     def sample_batch(self) -> list[tuple[torch.Tensor, torch.Tensor, float]]:
         """Sample a batch of tokenized replay transitions."""
         return [self.sample_transition() for _ in range(self.batch_size)]

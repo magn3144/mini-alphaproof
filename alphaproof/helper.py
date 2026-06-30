@@ -90,5 +90,6 @@ def make_config() -> 'Config':
             num_simulations=800,
             batch_size=2048,
             num_actors=3000,
+            num_games=1,
             lr=1.0,
     )
