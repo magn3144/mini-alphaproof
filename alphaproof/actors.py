@@ -37,30 +37,31 @@ def run_actor(
 def play_game(config: Config, network: Network, matchmaker: Matchmaker) -> Game:
     """Run one theorem episode and validate any discovered proof."""
     game = matchmaker.get_start_position()
-    environment = config.environment_ctor()
+    with config.environment_ctor() as environment:
+        state = environment.initial_state(game.theorem)
+        if game.disprove:
+            state = environment.step(state.id, 'disprove')
+        game.root = Node(
+                action=None,
+                observation=state.observation,
+                prior=1.0,
+                node_type=NodeType.OR,
+                state_id=state.id,
+                is_optimal=state.terminal,
+                is_terminal=state.terminal,
+                reward=state.reward,
+        )
+        assert game.root.node_type == NodeType.OR
 
-    state = environment.initial_state(game.theorem)
-    if game.disprove:
-        state = environment.step(state.id, 'disprove')
-    game.root = Node(
-            action=None,
-            observation=state.observation,
-            prior=1.0,
-            node_type=NodeType.OR,
-            state_id=state.id,
-            is_optimal=state.terminal,
-            is_terminal=state.terminal,
-            reward=state.reward,
-    )
-    assert game.root.node_type == NodeType.OR
+        # Run Monte Carlo tree search to find a proof.
+        run_mcts(config, game, network, environment)
 
-    # Run Monte Carlo tree search to find a proof.
-    run_mcts(config, game, network, environment)
     if game.root.is_optimal:
         # Perform final check to ensure the proof is valid.
         game.root.is_optimal = final_check(game)
-        # Compute value targets for the proof.
-        compute_value_target(game.root)
+        if game.root.is_optimal:
+            # Compute value targets for the proof.
+            compute_value_target(game.root)
 
     return game
 
@@ -178,7 +179,8 @@ def expand_node(
                     is_terminal=state.terminal,
                     reward=state.reward,
             )
-            node.is_optimal |= state.terminal
+            if node.node_type == NodeType.OR:
+                node.is_optimal |= state.terminal
             if state.num_goals > 1:
                 # For AND nodes, immediately add children with pseudo-actions to focus
                 # on each goal.

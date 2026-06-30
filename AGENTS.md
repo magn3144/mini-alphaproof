@@ -3,3 +3,28 @@
 - Write implementations as simple as possible, reusing exsisting functionality and avoiding ovverly complicated structures.
 - The actual project is in "alphaproof/".
 - "pseudocode.py" is not part of the actual project. It is used as a guide for how to structure the code. The code in "alphaproof/" should closely follow the structure of "pseudocode.py".
+- When you want to use py_compile, dont place the cache files in this repo, its annoying.
+
+
+# Design choices
+
+These are the design choices we have made so far.
+They might differ from the pseudocde, which is ok.
+
+ - Used LeanTree for interacting with Lean.
+ - Replay buffer samples uniformly.
+ - Computes tactic prior by summing token logprobs. This is used as the prior in PUCT.
+ - Value head uses mean pooled encoder output.
+ - Value head is currently linear layer.
+ - TODO: Data for each run should be stored like this, so runs can be resumed:
+ runs/
+   0/
+    config.json
+    matchmaker_stats.json
+    results.jsonl
+    replay_buffer.jsonl
+    checkpoints/
+      step_0001000.pt
+      step_0002000.pt
+      step_0003000.pt
+ - Actors are run sequentially for now, for a specific amount of iterations each.
