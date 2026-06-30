@@ -1,9 +1,17 @@
 import dataclasses
+import json
 import random
+from pathlib import Path
 
 from alphaproof.config import Config
 from alphaproof.environment import Theorem
 from alphaproof.game import Game
+
+
+DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
+DEFAULT_DATASET_PATH = DATA_DIR / 'dataset' / 'test_theorems.jsonl'
+RUNS_DIR = DATA_DIR / 'runs'
+MATCHMAKER_STATS_FILE = 'matchmaker_stats.json'
 
 
 class Matchmaker:
@@ -15,7 +23,7 @@ class Matchmaker:
         # List of (disprove, result) tuples:
         # Disprove is True iff this was an attempt to disprove the theorem.
         # Result is True iff the attempt was successful.
-        attempts: list[tuple[bool, bool]]
+        attempts: list[tuple[bool, bool]] = dataclasses.field(default_factory=list)
 
         def update(self, game: Game):
             """Update statistics with the results of a game."""
@@ -45,11 +53,63 @@ class Matchmaker:
                     return config.mm_proved_weight
             return 1.0
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: Config,
+        dataset_path: str | Path = DEFAULT_DATASET_PATH,
+    ):
         """Initialize theorem statistics from the backing store."""
         self.config = config
-        # Load theorems and their stats from the database.
-        self.theorem_stats: dict[Theorem, Matchmaker.Stats] = {}
+        self.run_dir = RUNS_DIR / str(config.run_id)
+        self.stats_path = self.run_dir / MATCHMAKER_STATS_FILE
+        self.theorem_stats = self._load_theorem_stats(Path(dataset_path))
+        self._save_theorem_stats()
+
+    def _load_theorem_stats(self, dataset_path: Path) -> dict[Theorem, Stats]:
+        """Load theorem starts from a JSONL dataset and resume run statistics."""
+        theorem_stats: dict[Theorem, Matchmaker.Stats] = {}
+        with dataset_path.open() as file:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                theorem = record['theorem']
+                theorem_stats[theorem] = Matchmaker.Stats()
+
+        if not theorem_stats:
+            raise ValueError(f'No theorems found in {dataset_path}.')
+
+        if self.stats_path.exists():
+            with self.stats_path.open() as file:
+                saved_stats = json.load(file)
+            for record in saved_stats.get('theorem_stats', []):
+                theorem = record['theorem']
+                if theorem in theorem_stats:
+                    theorem_stats[theorem] = Matchmaker.Stats(
+                            [
+                                    (bool(disprove), bool(success))
+                                    for disprove, success in record.get('attempts', [])
+                            ]
+                    )
+        return theorem_stats
+
+    def _save_theorem_stats(self):
+        """Persist theorem statistics for this run."""
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        records = [
+                {
+                        'theorem': theorem,
+                        'attempts': [
+                                [disprove, success]
+                                for disprove, success in stats.attempts
+                        ],
+                }
+                for theorem, stats in self.theorem_stats.items()
+        ]
+        with self.stats_path.open('w') as file:
+            json.dump({'theorem_stats': records}, file, indent=2)
+            file.write('\n')
 
     def compute_num_simulations(self, theorem: Theorem, stats: Stats) -> int:
         """Compute number of simulations to run for a theorem."""
@@ -74,3 +134,4 @@ class Matchmaker:
     def send_game(self, game: Game):
         """Send completed game to matchmaker."""
         self.theorem_stats[game.theorem].update(game)
+        self._save_theorem_stats()

@@ -58,3 +58,7 @@ class Config:
         self.mm_fully_decided_trust_count = 12
         self.mm_proved_weight = 1e-3
         self.mm_undecided_weight = 0.1
+
+        # Run id
+        # TODO: Update this when the game starts
+        self.run_id = 0
