@@ -1,26 +1,32 @@
 from __future__ import annotations
 
-import enum
 import re
 from collections import Counter
 from pathlib import Path
 
-from alphaproof.environment import Environment
+from alphaproof.actors import run_mcts
+from alphaproof.config import Config
+from alphaproof.environment import Environment, NodeType
+from alphaproof.game import Game, Node, final_check, run_lean_check
 from alphaproof.goedel_prover import GoedelProver
+from alphaproof.helper import (
+        negate_theorem,
+        replace_goal_with_false,
+        theorem_name,
+)
+from alphaproof.network import Network
 from leantree import LeanProject
 
 
 THEOREM_NAME = 'generated_problem'
 LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / 'lean_project'
-_goedel_prover: GoedelProver | None = None
 
 
-def sample_auto_formalization(nl_problem: str) -> str:
+def sample_auto_formalization(
+        nl_problem: str,
+        goedel_prover: GoedelProver,
+) -> str:
     """Samples a Lean formalization using Goedel Prover."""
-    global _goedel_prover
-    if _goedel_prover is None:
-        _goedel_prover = GoedelProver().load()
-
     prompt = f"""<task>
 Translate the natural language math problem into one Lean 4 theorem statement.
 </task>
@@ -45,7 +51,7 @@ theorem problem_name (n : Nat) : n + 0 = n
 
 <output>
 """
-    return _goedel_prover.sample(prompt, num_samples=1)[0]
+    return goedel_prover.sample(prompt, num_samples=1)[0]
 
 
 def extract_lean_code(sample: str) -> str:
@@ -77,22 +83,60 @@ def lean_is_valid_syntax(
 
 def lean_is_complete_proof(lean_code: str) -> bool:
     """Checks if Lean accepts the code as a full proof."""
-    raise NotImplementedError()
+    footer = ''
+    name = theorem_name(lean_code)
+    if name is not None:
+        footer = f'\n\n#print axioms {name}'
+
+    check_code = (
+            'import Mathlib\n'
+            'set_option warningAsError true\n\n'
+            f'{lean_code}{footer}\n'
+    )
+    return run_lean_check(check_code)
 
 
 def lean_replace_goal_with_false(lean_code: str) -> str:
     """Creates a new statement where the goal is to prove a contradiction is among the hypotheses."""
-    raise NotImplementedError()
+    return replace_goal_with_false(lean_code)
 
 
 def lean_negate_statement(lean_code: str) -> str:
     """Creates a new statement where the goal is to disprove the original statement."""
-    raise NotImplementedError()
+    return negate_theorem(lean_code)
 
 
-def is_provable(lean_statement: str) -> bool:
+def is_provable(
+        lean_statement: str,
+        config: Config,
+        network: Network,
+) -> bool:
     """Runs Alphaproof to check if the Lean statement is provable."""
-    raise NotImplementedError()
+    game = Game(
+            theorem=lean_statement,
+            disprove=False,
+            num_simulations=config.num_simulations,
+    )
+    try:
+        with config.environment_ctor() as environment:
+            state = environment.initial_state(game.theorem)
+            game.root = Node(
+                    action=None,
+                    observation=state.observation,
+                    prior=1.0,
+                    node_type=NodeType.OR,
+                    state_id=state.id,
+                    is_optimal=state.terminal,
+                    is_terminal=state.terminal,
+                    reward=state.reward,
+            )
+            run_mcts(config, game, network, environment)
+
+        if game.root.is_optimal:
+            game.root.is_optimal = final_check(game)
+        return game.root.is_optimal
+    except Exception:
+        return False
 
 
 def has_trivial_counterexample(lean_statement: str) -> bool:
@@ -134,10 +178,19 @@ def check_cycle_consistency(
     raise NotImplementedError()
 
 
-def auto_formalize_problem(nl_problem: str, n_samples: int) -> str | None:
+def auto_formalize_problem(
+        nl_problem: str,
+        n_samples: int,
+        goedel_prover: GoedelProver,
+        config: Config,
+        network: Network,
+) -> str | None:
     """Translates for a natural language statement into a Lean statement."""
 
-    samples = [sample_auto_formalization(nl_problem) for _ in range(n_samples)]
+    samples = [
+            sample_auto_formalization(nl_problem, goedel_prover)
+            for _ in range(n_samples)
+    ]
     lean_problems = [extract_lean_code(sample) for sample in samples]
     vote_counter = Counter(lean_problems)  # Deduplicate and count votes.
 
@@ -179,8 +232,14 @@ def auto_formalize_problem(nl_problem: str, n_samples: int) -> str | None:
 
             # Use small-budget Alphaproof to check if the statement is disprovable or
             # the hypotheses are contradictory.
-            if is_provable(lean_negated) or is_provable(
-                    lean_exfalso
+            if is_provable(
+                    lean_negated,
+                    config,
+                    network,
+            ) or is_provable(
+                    lean_exfalso,
+                    config,
+                    network,
             ):
                 continue
 

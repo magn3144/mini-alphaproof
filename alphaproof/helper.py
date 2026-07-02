@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from typing import TYPE_CHECKING
 
@@ -21,8 +23,17 @@ def negate_theorem(theorem: str) -> str:
     goal_start = _find_goal_colon(before_proof)
     header = before_proof[:goal_start + 1]
     goal = before_proof[goal_start + 1:].strip()
-    header = _rename_decl(header)
+    header = _rename_decl(header, '_disproof')
     return f'{header} ¬ ({goal}) {proof}'
+
+
+def replace_goal_with_false(theorem: str) -> str:
+    """Create a theorem whose hypotheses imply False."""
+    before_proof, proof = _split_sorry_proof(theorem)
+    goal_start = _find_goal_colon(before_proof)
+    header = before_proof[:goal_start + 1]
+    header = _rename_decl(header, '_exfalso')
+    return f'{header} False {proof}'
 
 
 def theorem_name(theorem: str) -> str | None:
@@ -74,12 +85,12 @@ def _find_goal_colon(header: str) -> int:
     return goal_colon
 
 
-def _rename_decl(header: str) -> str:
+def _rename_decl(header: str, suffix: str) -> str:
     match = re.match(r'(\s*(?:theorem|lemma)\s+)([^\s(:]+)(.*)', header, re.S)
     if match is None:
         return header
     prefix, name, rest = match.groups()
-    return f'{prefix}{name}_disproof{rest}'
+    return f'{prefix}{name}{suffix}{rest}'
 
 
 def make_config() -> 'Config':
