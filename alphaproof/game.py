@@ -187,14 +187,17 @@ def build_lean_check(theorem: Theorem, proof_lines: list[str]) -> str:
     return f'import Mathlib\nset_option warningAsError true\n\n{declaration}{footer}\n'
 
 
-def run_lean_check(lean_code: str) -> bool:
-    """Run Lean on generated code and reject sorry-backed proofs."""
+def run_lean(
+        lean_code: str,
+        prefix: str = 'AlphaProofCheck',
+) -> subprocess.CompletedProcess[str]:
+    """Run Lean on generated code and return the completed process."""
     LEAN_PROJECT_DIR.mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(
         'w',
         dir=LEAN_PROJECT_DIR,
         suffix='.lean',
-        prefix='AlphaProofFinalCheck',
+        prefix=prefix,
         delete=False,
     ) as file:
         file.write(lean_code)
@@ -212,6 +215,12 @@ def run_lean_check(lean_code: str) -> bool:
     finally:
         file_path.unlink(missing_ok=True)
 
+    return result
+
+
+def run_lean_check(lean_code: str) -> bool:
+    """Run Lean on generated code and reject sorry-backed proofs."""
+    result = run_lean(lean_code, prefix='AlphaProofFinalCheck')
     return result.returncode == 0
 
 

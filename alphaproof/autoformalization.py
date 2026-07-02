@@ -7,10 +7,11 @@ from pathlib import Path
 from alphaproof.actors import run_mcts
 from alphaproof.config import Config
 from alphaproof.environment import Environment, NodeType
-from alphaproof.game import Game, Node, final_check, run_lean_check
+from alphaproof.game import Game, Node, final_check, run_lean, run_lean_check
 from alphaproof.goedel_prover import GoedelProver
 from alphaproof.helper import (
         negate_theorem,
+        replace_sorry_proof,
         replace_goal_with_false,
         theorem_name,
 )
@@ -48,8 +49,6 @@ theorem problem_name (n : Nat) : n + 0 = n
 <problem>
 {nl_problem}
 </problem>
-
-<output>
 """
     return goedel_prover.sample(prompt, num_samples=1)[0]
 
@@ -140,8 +139,19 @@ def is_provable(
 
 
 def has_trivial_counterexample(lean_statement: str) -> bool:
-    """Run a modified version of Lean's `plausible` tactic with extra support for real numbers."""
-    raise NotImplementedError()
+    """Run a modified version of Lean's `plausible` tactic."""
+    try:
+        declaration = replace_sorry_proof(
+                lean_statement,
+                ['  plausible (config := { quiet := true })'],
+        )
+    except ValueError:
+        return False
+
+    lean_code = f'import Mathlib\nimport Plausible\n\n{declaration}\n'
+    result = run_lean(lean_code, prefix='AlphaProofPlausible')
+    output = result.stdout + result.stderr
+    return 'Found a counter-example!' in output
 
 
 def is_easily_provable(lean_statement: str) -> bool:
@@ -163,19 +173,53 @@ def is_easily_provable(lean_statement: str) -> bool:
     return False
 
 
-def deformalize_lean(lean_statement: str) -> str:
+def deformalize_lean(
+        lean_statement: str,
+        model: GoedelProver,
+) -> str:
     """Deformalizes a Lean statement into a natural language statement."""
-    # Uses an off-the-shelf, publicly available model.
-    raise NotImplementedError()
+    prompt = f"""<task>
+Translate the Lean theorem statement into a natural language math statement.
+</task>
+
+<instructions>
+Return only the natural language statement.
+Do not include a proof, commentary, markdown, or Lean code.
+</instructions>
+
+<lean>
+{lean_statement}
+</lean>
+"""
+    return model.sample(prompt, num_samples=1)[0].strip()
 
 
 def check_cycle_consistency(
         original_statement: str,
         deformalized_statement: str,
+        model: GoedelProver,
 ) -> bool:
     """Checks if the original and deformalized statements are equivalent."""
-    # Uses an off-the-shelf, publicly available model.
-    raise NotImplementedError()
+    prompt = f"""<task>
+Decide whether two natural language math statements have the same mathematical meaning.
+</task>
+
+<instructions>
+Answer only YES or NO.
+Answer YES if the statements are mathematically equivalent.
+Answer NO if either statement is stronger, weaker, or about different objects.
+</instructions>
+
+<statement_a>
+{original_statement}
+</statement_a>
+
+<statement_b>
+{deformalized_statement}
+</statement_b>
+"""
+    answer = model.sample(prompt, num_samples=1)[0].strip().upper()
+    return answer.startswith('YES')
 
 
 def auto_formalize_problem(
@@ -226,8 +270,12 @@ def auto_formalize_problem(
 
             # Check cycle consistency: ask a model to deformalize a statement,
             # then ask if the original and deformalized statements are equivalent.
-            deformalized_stmt = deformalize_lean(lean_problem)
-            if not check_cycle_consistency(nl_problem, deformalized_stmt):
+            deformalized_stmt = deformalize_lean(lean_problem, goedel_prover)
+            if not check_cycle_consistency(
+                    nl_problem,
+                    deformalized_stmt,
+                    goedel_prover,
+            ):
                 continue
 
             # Use small-budget Alphaproof to check if the statement is disprovable or
