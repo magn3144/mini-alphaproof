@@ -1,22 +1,78 @@
 from __future__ import annotations
 
 import enum
+import re
 from collections import Counter
+from pathlib import Path
+
+from alphaproof.environment import Environment
+from alphaproof.goedel_prover import GoedelProver
+from leantree import LeanProject
+
+
+THEOREM_NAME = 'generated_problem'
+LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / 'lean_project'
+_goedel_prover: GoedelProver | None = None
 
 
 def sample_auto_formalization(nl_problem: str) -> str:
-    """Samples a Lean formalization using an LLM."""
-    raise NotImplementedError()
+    """Samples a Lean formalization using Goedel Prover."""
+    global _goedel_prover
+    if _goedel_prover is None:
+        _goedel_prover = GoedelProver().load()
+
+    prompt = f"""<task>
+Translate the natural language math problem into one Lean 4 theorem statement.
+</task>
+
+<instructions>
+Return only the Lean theorem statement.
+Do not include imports, a proof, ":= by", "sorry", comments, markdown, or explanation.
+</instructions>
+
+<example>
+<problem>
+For every natural number n, n plus zero equals n.
+</problem>
+<output>
+theorem problem_name (n : Nat) : n + 0 = n
+</output>
+</example>
+
+<problem>
+{nl_problem}
+</problem>
+
+<output>
+"""
+    return _goedel_prover.sample(prompt, num_samples=1)[0]
 
 
 def extract_lean_code(sample: str) -> str:
     """Extracts the Lean code from a sample."""
-    raise NotImplementedError()
+    statement = re.sub(
+        r'^\s*theorem\s+\S+',
+        f'theorem {THEOREM_NAME}',
+        sample,
+        count=1,
+    )
+    return statement + ' := by\n  sorry'
 
 
-def lean_is_valid_syntax(lean_statement: str) -> bool:
+def lean_is_valid_syntax(
+        lean_statement: str,
+        environment: Environment | None = None,
+) -> bool:
     """Validates Lean code for syntax and common linting errors."""
-    raise NotImplementedError()
+    if environment is not None:
+        try:
+            environment.initial_state(lean_statement)
+            return True
+        except Exception:
+            return False
+
+    with Environment(LeanProject(str(LEAN_PROJECT_DIR))) as environment:
+        return lean_is_valid_syntax(lean_statement, environment)
 
 
 def lean_is_complete_proof(lean_code: str) -> bool:
@@ -90,44 +146,45 @@ def auto_formalize_problem(nl_problem: str, n_samples: int) -> str | None:
     ]
     problems_with_votes.sort(reverse=True)  # Order by votes (most to least).
 
-    # Find the most-voted candidate that passes sanity checking.
-    for _, lean_problem in problems_with_votes:
-        # Remove samples that do not have a valid Lean syntax.
-        if not lean_is_valid_syntax(lean_problem):
-            continue
+    with Environment(LeanProject(str(LEAN_PROJECT_DIR))) as environment:
+        # Find the most-voted candidate that passes sanity checking.
+        for _, lean_problem in problems_with_votes:
+            # Remove samples that do not have a valid Lean syntax.
+            if not lean_is_valid_syntax(lean_problem, environment):
+                continue
 
-        # Create two new Lean statements: one where the goal is to disprove the
-        # original statement, and one where the goal is to prove the hypotheses
-        # are contradictory.
-        lean_negated = lean_negate_statement(lean_problem)
-        lean_exfalso = lean_replace_goal_with_false(lean_problem)
+            # Create two new Lean statements: one where the goal is to disprove the
+            # original statement, and one where the goal is to prove the hypotheses
+            # are contradictory.
+            lean_negated = lean_negate_statement(lean_problem)
+            lean_exfalso = lean_replace_goal_with_false(lean_problem)
 
-        # Discard statements that have a single-tactic proof.
-        if (
-                is_easily_provable(lean_problem)
-                or is_easily_provable(lean_negated)
-                or is_easily_provable(lean_exfalso)
-        ):
-            continue
+            # Discard statements that have a single-tactic proof.
+            if (
+                    is_easily_provable(lean_problem)
+                    or is_easily_provable(lean_negated)
+                    or is_easily_provable(lean_exfalso)
+            ):
+                continue
 
-        # Discard statements that have a trivial counterexamples.
-        if has_trivial_counterexample(lean_problem):
-            continue
+            # Discard statements that have a trivial counterexamples.
+            if has_trivial_counterexample(lean_problem):
+                continue
 
-        # Check cycle consistency: ask a model to deformalize a statement,
-        # then ask if the original and deformalized statements are equivalent.
-        deformalized_stmt = deformalize_lean(lean_problem)
-        if not check_cycle_consistency(nl_problem, deformalized_stmt):
-            continue
+            # Check cycle consistency: ask a model to deformalize a statement,
+            # then ask if the original and deformalized statements are equivalent.
+            deformalized_stmt = deformalize_lean(lean_problem)
+            if not check_cycle_consistency(nl_problem, deformalized_stmt):
+                continue
 
-        # Use small-budget Alphaproof to check if the statement is disprovable or
-        # the hypotheses are contradictory.
-        if is_provable(lean_negated) or is_provable(
-                lean_exfalso
-        ):
-            continue
+            # Use small-budget Alphaproof to check if the statement is disprovable or
+            # the hypotheses are contradictory.
+            if is_provable(lean_negated) or is_provable(
+                    lean_exfalso
+            ):
+                continue
 
-        return lean_problem
+            return lean_problem
 
     # All samples failed.
     return None
