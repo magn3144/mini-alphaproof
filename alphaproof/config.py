@@ -1,8 +1,13 @@
 import typing
+from pathlib import Path
 from typing import Any, Callable, List, Dict
 
 from alphaproof.environment import Environment
 from leantree import LeanProject, LeanTactic, LeanProofState
+
+
+MODELS_DIR = Path(__file__).resolve().parent.parent / 'models'
+DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
 
 
 class Config:
@@ -18,7 +23,7 @@ class Config:
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject('lean_project'))
         ),
-        tokenizer_model: str = 'Salesforce/codet5p-220m',
+        tokenizer_model: str = DEFAULT_TOKENIZER_MODEL,
     ):
         """Populate acting, search, training, and matchmaker settings."""
         ### Acting
