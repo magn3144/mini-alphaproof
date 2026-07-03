@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "datasets>=4.0.0",
     "leantree",
     "torch>=2.12.1",
     "transformers>=4.36.0,<5",

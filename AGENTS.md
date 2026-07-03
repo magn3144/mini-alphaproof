@@ -12,7 +12,7 @@
 These are the design choices we have made so far.
 They might differ from the pseudocde, which is ok.
 
- - Used LeanTree for interacting with Lean.
+ - Used LeanTree for interacting with Lean 4.
  - Replay buffer samples uniformly.
  - Computes tactic prior by summing token logprobs. This is used as the prior in PUCT.
  - Value head uses mean pooled encoder output.
@@ -30,3 +30,5 @@ They might differ from the pseudocde, which is ok.
       step_0003000.pt
  - Actors are run sequentially for now, for a specific amount of iterations each.
  - Encoder called again every time a node is expanded again.
+ - The autoformalizer only generates one lean problem per natural language problem.
+ - The dataset used is AI-MO/NuminaMath-1.5. Autoformalization is used in this project to convert problems to Lean.
