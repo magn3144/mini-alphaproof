@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from alphaproof.config import Config
+    from alphaproof.core.config import Config
 
 
 _PROOF_SEPARATOR = ':= by sorry'
@@ -95,7 +95,7 @@ def _rename_decl(header: str, suffix: str) -> str:
 
 def make_config() -> 'Config':
     """Create the default pseudocode training configuration."""
-    from alphaproof.config import Config
+    from alphaproof.core.config import Config
 
     return Config(
             num_simulations=800,

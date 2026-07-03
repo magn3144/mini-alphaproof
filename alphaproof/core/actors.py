@@ -1,13 +1,13 @@
 import math
 from typing import Dict, List
 
-from alphaproof.config import Config
-from alphaproof.environment import Action, Environment, NodeType
-from alphaproof.game import Game, Node, compute_value_target, final_check
-from alphaproof.matchmaker import Matchmaker
-from alphaproof.network import Network
-from alphaproof.replay_buffer import ReplayBuffer
-from alphaproof.shared_storage import SharedStorage
+from alphaproof.core.config import Config
+from alphaproof.core.environment import Action, Environment, NodeType
+from alphaproof.core.game import Game, Node, compute_value_target, final_check
+from alphaproof.training.matchmaker import Matchmaker
+from alphaproof.core.network import Network
+from alphaproof.training.replay_buffer import ReplayBuffer
+from alphaproof.training.shared_storage import SharedStorage
 
 
 # Each acting job is independent of all others; it takes the latest network

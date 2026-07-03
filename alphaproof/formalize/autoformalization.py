@@ -4,18 +4,18 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from alphaproof.actors import run_mcts
-from alphaproof.config import Config
-from alphaproof.environment import Environment, NodeType
-from alphaproof.game import Game, Node, final_check, run_lean, run_lean_check
-from alphaproof.goedel_prover import GoedelProver
-from alphaproof.helper import (
+from alphaproof.core.actors import run_mcts
+from alphaproof.core.config import Config
+from alphaproof.core.environment import Environment, NodeType
+from alphaproof.core.game import Game, Node, final_check, run_lean, run_lean_check
+from alphaproof.formalize.goedel_prover import GoedelProver
+from alphaproof.core.helper import (
         negate_theorem,
         replace_sorry_proof,
         replace_goal_with_false,
         theorem_name,
 )
-from alphaproof.network import Network
+from alphaproof.core.network import Network
 from leantree import LeanProject
 
 

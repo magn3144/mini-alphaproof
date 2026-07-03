@@ -6,8 +6,8 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import AutoTokenizer, T5ForConditionalGeneration
 
-from alphaproof.config import Config
-from alphaproof.environment import Action
+from alphaproof.core.config import Config
+from alphaproof.core.environment import Action
 
 
 Params = dict[str, torch.Tensor]

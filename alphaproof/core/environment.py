@@ -2,7 +2,7 @@ import typing
 from typing import Any, Callable, List, Dict
 import enum
 
-from alphaproof.helper import negate_theorem
+from alphaproof.core.helper import negate_theorem
 from leantree import LeanProject, LeanTactic, LeanProofState
 
 

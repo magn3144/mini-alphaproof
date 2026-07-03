@@ -4,8 +4,8 @@ from typing import Any
 from transformers import AutoTokenizer
 import torch
 
-from alphaproof.config import Config
-from alphaproof.game import Game, extract_transitions
+from alphaproof.core.config import Config
+from alphaproof.core.game import Game, extract_transitions
 
 
 class ReplayBuffer:

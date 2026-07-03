@@ -2,7 +2,7 @@ import typing
 from pathlib import Path
 from typing import Any, Callable, List, Dict
 
-from alphaproof.environment import Environment
+from alphaproof.core.environment import Environment
 from leantree import LeanProject, LeanTactic, LeanProofState
 
 

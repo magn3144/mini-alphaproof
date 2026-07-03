@@ -1,9 +1,9 @@
-from alphaproof.actors import run_actor
-from alphaproof.config import Config
-from alphaproof.matchmaker import Matchmaker
-from alphaproof.network import Network
-from alphaproof.replay_buffer import ReplayBuffer
-from alphaproof.shared_storage import SharedStorage
+from alphaproof.core.actors import run_actor
+from alphaproof.core.config import Config
+from alphaproof.training.matchmaker import Matchmaker
+from alphaproof.core.network import Network
+from alphaproof.training.replay_buffer import ReplayBuffer
+from alphaproof.training.shared_storage import SharedStorage
 
 
 def train_network(

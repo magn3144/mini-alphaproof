@@ -13,9 +13,9 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ''):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from alphaproof.environment import Environment, NodeType, State
-from alphaproof.game import Game, Node, action_to_tactic, extract_proof_script
-from alphaproof.helper import replace_sorry_proof, theorem_for_game
+from alphaproof.core.environment import Environment, NodeType, State
+from alphaproof.core.game import Game, Node, action_to_tactic, extract_proof_script
+from alphaproof.core.helper import replace_sorry_proof, theorem_for_game
 from leantree import LeanProject
 
 

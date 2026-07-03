@@ -3,9 +3,9 @@ import json
 import random
 from pathlib import Path
 
-from alphaproof.config import Config
-from alphaproof.environment import Theorem
-from alphaproof.game import Game
+from alphaproof.core.config import Config
+from alphaproof.core.environment import Theorem
+from alphaproof.core.game import Game
 
 
 DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
