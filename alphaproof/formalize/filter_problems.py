@@ -8,24 +8,21 @@ NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5.jsonl'
 FILTERED_NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5_filtered.jsonl'
 
 GOOD_PROBLEM_TYPES = {
-        'Algebra',
-        'Number Theory',
-        'Inequalities',
-        'Combinatorics',
+    'Algebra',
+    'Number Theory',
+    'Inequalities',
 }
+
 GOOD_QUESTION_TYPES = {
-        'proof',
-        'math-word-problem',
+    'proof',
 }
+
 GOOD_SOURCES = {
-        'amc_aime',
-        'aops_forum',
-        'inequalities',
-        'number_theory',
-        'olympiads',
-        'olympiads_ref',
-        'orca_math',
-        'synthetic_math',
+    'olympiads',
+    'olympiads_ref',
+    'aops_forum',
+    'inequalities',
+    'number_theory',
 }
 MAX_PROBLEM_LENGTH = 1200
 
