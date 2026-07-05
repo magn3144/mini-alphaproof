@@ -11,15 +11,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 if __package__ in (None, ''):
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from alphaproof.core.environment import Environment, NodeType, State
 from alphaproof.core.game import Game, Node, action_to_tactic, extract_proof_script
 from alphaproof.core.helper import replace_sorry_proof, theorem_for_game
+from alphaproof.core.paths import LEAN_PROJECT_DIR
 from leantree import LeanProject
-
-
-LEAN_PROJECT_DIR = Path(__file__).resolve().parents[1] / 'lean_project'
 
 
 class InteractiveSession:

@@ -2,12 +2,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from alphaproof.core.helper import replace_sorry_proof, theorem_for_game, theorem_name
 from alphaproof.core.environment import Action, NodeType, Observation, Theorem
+from alphaproof.core.helper import replace_sorry_proof, theorem_for_game, theorem_name
+from alphaproof.core.paths import LEAN_PROJECT_DIR
 from leantree import LeanTactic
-
-
-LEAN_PROJECT_DIR = Path('lean_project')
 
 
 class Node:

@@ -1,12 +1,11 @@
 import typing
-from pathlib import Path
 from typing import Any, Callable, List, Dict
 
 from alphaproof.core.environment import Environment
+from alphaproof.core.paths import LEAN_PROJECT_DIR, MODELS_DIR
 from leantree import LeanProject, LeanTactic, LeanProofState
 
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / 'models'
 DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
 
 
@@ -21,7 +20,7 @@ class Config:
         num_games: int,
         lr: float,
         environment_ctor: Callable[[], Environment] = (
-            lambda: Environment(LeanProject('lean_project'))
+            lambda: Environment(LeanProject(str(LEAN_PROJECT_DIR)))
         ),
         tokenizer_model: str = DEFAULT_TOKENIZER_MODEL,
     ):

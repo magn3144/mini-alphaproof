@@ -32,3 +32,4 @@ They might differ from the pseudocde, which is ok.
  - Encoder called again every time a node is expanded again.
  - The autoformalizer only generates one lean problem per natural language problem.
  - The dataset used is AI-MO/NuminaMath-1.5. Autoformalization is used in this project to convert problems to Lean.
+ - Currently we are keeping only the easiest problems to formalize, but we might later improve the formalization pipeline to include more problems.

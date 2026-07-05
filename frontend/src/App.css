@@ -19,6 +19,7 @@
   cursor: grab;
   overflow: hidden;
   touch-action: none;
+  user-select: none;
 }
 
 .tree-viewport:active {
@@ -204,6 +205,7 @@
   background: rgba(255, 255, 255, 0.94);
   font: 14px/1.45 var(--mono);
   outline: none;
+  user-select: text;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease;

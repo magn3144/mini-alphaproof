@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from pathlib import Path
 
 from alphaproof.core.actors import run_mcts
 from alphaproof.core.config import Config
@@ -16,11 +15,11 @@ from alphaproof.core.helper import (
         theorem_name,
 )
 from alphaproof.core.network import Network
+from alphaproof.core.paths import LEAN_PROJECT_DIR
 from leantree import LeanProject
 
 
 THEOREM_NAME = 'generated_problem'
-LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / 'lean_project'
 
 
 def sample_auto_formalization(
