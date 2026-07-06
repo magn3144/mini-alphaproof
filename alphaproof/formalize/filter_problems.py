@@ -6,44 +6,36 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / 'data'
 DATASET_DIR = DATA_DIR / 'dataset'
 NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5.jsonl'
 FILTERED_NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5_filtered.jsonl'
+DATASET_ID_PREFIX = 'numina_math_1_5'
 
 GOOD_PROBLEM_TYPES = {
     'Algebra',
-    'Number Theory',
+    'Calculus',
+    'Combinatorics',
     'Inequalities',
+    'Logic and Puzzles',
+    'Number Theory',
 }
 
 GOOD_QUESTION_TYPES = {
     'proof',
+    'math-word-problem',
+    'MCQ',
 }
 
 GOOD_SOURCES = {
+    'amc_aime',
     'olympiads',
     'olympiads_ref',
     'aops_forum',
     'inequalities',
     'number_theory',
+    'cn_k12',
+    'cn_contest',
+    'orca_math',
+    'synthetic_math',
 }
 MAX_PROBLEM_LENGTH = 1200
-
-
-def looks_like_multi_part_problem(problem: str) -> bool:
-    """Return whether a problem appears to contain multiple subproblems."""
-    lowered = problem.lower()
-    numbered_markers = [
-            '(1)',
-            '(2)',
-            '1.',
-            '2.',
-            '(a)',
-            '(b)',
-            'a)',
-            'b)',
-            'part a',
-            'part b',
-    ]
-    markers_found = sum(marker in lowered for marker in numbered_markers)
-    return markers_found >= 2
 
 
 def keep_record(record: dict) -> bool:
@@ -65,18 +57,16 @@ def keep_record(record: dict) -> bool:
     if record.get('source') not in GOOD_SOURCES:
         return False
 
-    if looks_like_multi_part_problem(problem):
-        return False
-
     if len(problem) > MAX_PROBLEM_LENGTH:
         return False
 
     return True
 
 
-def filtered_record(record: dict) -> dict:
+def filtered_record(record: dict, problem_id: str) -> dict:
     """Build the filtered dataset record used as autoformalization input."""
     return {
+            'id': problem_id,
             'problem': record['problem'].strip(),
             'source': record['source'],
             'problem_type': record['problem_type'],
@@ -95,15 +85,19 @@ def filter_numina_math_1_5(
     rows_written = 0
     with input_path.open(encoding='utf-8') as input_file:
         with output_path.open('w', encoding='utf-8') as output_file:
-            for line in input_file:
+            for row_ix, line in enumerate(input_file):
                 line = line.strip()
                 if not line:
                     continue
 
                 record = json.loads(line)
                 if keep_record(record):
+                    problem_id = f'{DATASET_ID_PREFIX}_{row_ix:07d}'
                     output_file.write(
-                            json.dumps(filtered_record(record), ensure_ascii=False)
+                            json.dumps(
+                                    filtered_record(record, problem_id),
+                                    ensure_ascii=False,
+                            )
                             + '\n'
                     )
                     rows_written += 1
