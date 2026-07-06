@@ -71,6 +71,7 @@ def filtered_record(record: dict, problem_id: str) -> dict:
             'source': record['source'],
             'problem_type': record['problem_type'],
             'question_type': record['question_type'],
+            'answer': record.get('answer'),
             'synthetic': record['synthetic'],
     }
 
