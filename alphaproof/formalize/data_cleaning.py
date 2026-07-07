@@ -1,9 +1,10 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from alphaproof.formalize.filter_problems import FILTERED_NUMINA_MATH_1_5_PATH
-from alphaproof.formalize.qwen3 import Qwen3
+from alphaproof.formalize.qwen3 import Qwen3, Qwen3_8B
 
 
 CLEANED_NUMINA_MATH_1_5_PATH = (
@@ -171,40 +172,38 @@ D: Two lines perpendicular to the same line in the same plane are parallel.
 <answer>{answer}</answer>
 """
 
-REMOVE_OPTIONS_PROMPT = """<task>
+REMOVE_OPTIONS_PROMPT = r"""<task>
 Convert a multiple-choice math problem into a direct math word problem.
 </task>
 
 <instructions>
 Return only valid JSON.
 Use this exact schema:
-{"problem": "problem text without options", "answer": "selected answer value"}
+{"problem": "self-contained problem text without option labels"}
 
-Remove the answer options from the problem.
-Use the provided answer label to replace A, B, C, D, etc. with the actual selected
-option value. Do not leave the answer as a letter unless the selected option itself
-is a letter.
+Rephrase the MCQ problem statement as a math-word-problem such that the answer
+option labels are removed. Make sure the resulting math-word-problem is self
+contained. If information from the options is needed to make the problem self
+contained, include that information in the rewritten problem without mentioning
+which option is correct.
 </instructions>
 
 <example>
 <problem>
-The sequence $\\{a_n\\}$ satisfies: $a_1=2$, $a_{n+1}=4a_n-3$. Then, $a_{10}$
-equals to ( )
-A: $2^{18}-1$
-B: $2^{18}+1$
-C: $2^{20}+1$
-D: $2^{20}-1$
+Which of the following numbers is irrational?
+A: $3.14$
+B: $\frac{2}{7}$
+C: $\sqrt{0.04}$
+D: $\pi - 3.14$
 </problem>
-<answer>B</answer>
 <output>
-{"problem": "The sequence $\\{a_n\\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.", "answer": "$2^{18}+1$"}
+{"problem": "Determine which of the numbers $3.14$, $\frac{2}{7}$, $\sqrt{0.04}$, and $\pi - 3.14$ is irrational."}
 </output>
 </example>
 
 <problem>
 {problem}
 </problem>
-<answer>{answer}</answer>
 """
 
 ANSWER_PROOF_PROMPT = """<task>
@@ -301,8 +300,42 @@ def parse_json_object(answer: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end < start:
         raise ValueError(f'Expected JSON object, got: {answer!r}')
 
-    return json.loads(text[start:end + 1])
+    json_text = text[start:end + 1]
+    try:
+        return json.loads(json_text)
+    except json.JSONDecodeError:
+        return json.loads(escape_invalid_json_backslashes(json_text))
 
+
+def escape_invalid_json_backslashes(text: str) -> str:
+    """Escape LaTeX-style backslashes that are invalid in JSON strings."""
+    valid_escapes = {'"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'}
+    escaped = []
+    ix = 0
+
+    while ix < len(text):
+        char = text[ix]
+        if char != '\\':
+            escaped.append(char)
+            ix += 1
+            continue
+
+        if ix + 1 >= len(text):
+            escaped.append('\\\\')
+            ix += 1
+            continue
+
+        next_char = text[ix + 1]
+        if next_char in valid_escapes:
+            escaped.append(char)
+            escaped.append(next_char)
+            ix += 2
+            continue
+
+        escaped.append('\\\\')
+        ix += 1
+
+    return ''.join(escaped)
 
 def sample_json_object(
         prompt: str,
@@ -370,20 +403,37 @@ def split_into_several_problems(record: dict, model: Qwen3) -> list[dict]:
     return split_problems
 
 
+def selected_option_answer(record: dict) -> Any:
+    """Return the selected MCQ option value when the answer is a simple label."""
+    answer = record.get('answer')
+    answer_label = str(answer).strip()
+    if not re.fullmatch(r'[A-D]', answer_label):
+        return answer
+
+    option_pattern = re.compile(
+            r'(?:^|\s)([A-D])\s*:\s*(.*?)(?=\s+[A-D]\s*:|\s*$)',
+            re.DOTALL,
+    )
+    for label, option in option_pattern.findall(record['problem']):
+        if label == answer_label:
+            return option.strip()
+
+    return answer
+
+
 def remove_options(record: dict, model: Qwen3) -> dict:
     """Convert a normal MCQ into a direct problem with a direct answer."""
     prompt = fill_prompt(
             REMOVE_OPTIONS_PROMPT,
             problem=record['problem'].strip(),
-            answer=str(record.get('answer')),
     )
     parsed = sample_json_object(prompt, model)
     problem = parsed.get('problem')
-    answer = parsed.get('answer')
+    answer = selected_option_answer(record)
     if not isinstance(problem, str) or not problem.strip():
         raise ValueError(f'Expected problem text, got: {parsed!r}')
     if answer is None or str(answer).strip() == '':
-        raise ValueError(f'Expected selected answer, got: {parsed!r}')
+        raise ValueError(f'Expected selected answer, got: {record!r}')
     return {'problem': problem.strip(), 'answer': answer}
 
 
@@ -463,18 +513,21 @@ def add_proof_problem_rows(
         suffix: str,
 ) -> int:
     """Write answer-aware and answer-free proof problem rows."""
-    with_answer = proof_problem_with_answer(problem, answer, model)
-    write_record(
-            output_file,
-            formalization_record(
-                    derived_record(
-                            record,
-                            with_answer,
-                            answer,
-                            f'{suffix}_with_answer',
-                    )
-            ),
-    )
+    rows_written = 0
+    if answer is not None and str(answer).strip() != '':
+        with_answer = proof_problem_with_answer(problem, answer, model)
+        write_record(
+                output_file,
+                formalization_record(
+                        derived_record(
+                                record,
+                                with_answer,
+                                answer,
+                                f'{suffix}_with_answer',
+                        )
+                ),
+        )
+        rows_written += 1
 
     without_answer = proof_problem_without_answer(problem, model)
     write_record(
@@ -488,17 +541,17 @@ def add_proof_problem_rows(
                     )
             ),
     )
-    return 2
-
+    rows_written += 1
+    return rows_written
 
 def main(
         input_path: Path = FILTERED_NUMINA_MATH_1_5_PATH,
         output_path: Path = CLEANED_NUMINA_MATH_1_5_PATH,
 ) -> None:
     """Run the data cleaning pipeline over the filtered dataset."""
-    qwen = Qwen3()
+    qwen = Qwen3_8B(quantization='8bit')
     qwen.load()
-    print(f'Loaded Qwen3 model from {qwen.model_dir} on {qwen.device}.')
+    print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

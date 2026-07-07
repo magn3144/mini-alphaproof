@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.0.0",
+    "bitsandbytes>=0.43.0",
     "datasets>=4.0.0",
     "leantree",
     "matplotlib>=3.10.0",
