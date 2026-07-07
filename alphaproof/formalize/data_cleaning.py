@@ -11,7 +11,7 @@ CLEANED_NUMINA_MATH_1_5_PATH = (
         FILTERED_NUMINA_MATH_1_5_PATH.parent / 'numina_math_1_5_cleaned.jsonl'
 )
 
-MISSING_INFORMATION_PROMPT = """<task>
+MISSING_INFORMATION_PROMPT = r"""<task>
 Decide whether a math problem is missing information needed to solve or formalize it.
 </task>
 
@@ -25,7 +25,7 @@ Answer NO if the problem statement contains all information needed, even if it i
 <examples>
 <example>
 <problem>
-Given are numbers $ a_1, a_2, \\ldots, a_n $, each two of which are different. Find the
+Given are numbers $ a_1, a_2, \ldots, a_n $, each two of which are different. Find the
 smallest value of the function defined by the formula Note: The formula or expression
 that should follow is missing in the original text. If you have the complete formula,
 please provide it for a full translation.
@@ -82,7 +82,7 @@ $p^n-(p-1)^n$ is a power of 3.
 </problem>
 """
 
-SEVERAL_STATEMENTS_PROMPT = """<task>
+SEVERAL_STATEMENTS_PROMPT = r"""<task>
 Decide whether this multiple-choice math problem has options that are separate
 mathematical statements or propositions.
 </task>
@@ -109,7 +109,7 @@ D: Two lines perpendicular to the same line in the same plane are parallel.
 
 <example>
 <problem>
-The sequence $\\{a_n\\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$.
+The sequence $\{a_n\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$.
 Then $a_{10}$ equals to ( )
 A: $2^{18}-1$
 B: $2^{18}+1$
@@ -125,14 +125,14 @@ D: $2^{20}-1$
 </problem>
 """
 
-SPLIT_PROBLEM_PROMPT = """<task>
+SPLIT_PROBLEM_PROMPT = r"""<task>
 Split a math problem into separate standalone problems.
 </task>
 
 <instructions>
 Return only valid JSON.
 Use this exact schema:
-{"problems": [{"problem": "standalone problem text", "answer": "answer or null"}]}
+{"problems": [{"problem": "standalone problem text", "answer": null}]}
 
 Each output problem must be understandable without the original combined problem.
 If the input is a multi-part problem, split each part into one problem.
@@ -197,7 +197,7 @@ C: $\sqrt{0.04}$
 D: $\pi - 3.14$
 </problem>
 <output>
-{"problem": "Determine which of the numbers $3.14$, $\frac{2}{7}$, $\sqrt{0.04}$, and $\pi - 3.14$ is irrational."}
+{"problem": "Determine which of the numbers $3.14$, $\\frac{2}{7}$, $\\sqrt{0.04}$, and $\\pi - 3.14$ is irrational."}
 </output>
 </example>
 
@@ -206,7 +206,7 @@ D: $\pi - 3.14$
 </problem>
 """
 
-ANSWER_PROOF_PROMPT = """<task>
+ANSWER_PROOF_PROMPT = r"""<task>
 Rewrite a math problem as a proof problem using the known answer.
 </task>
 
@@ -222,7 +222,7 @@ Do not include a solution or explanation.
 
 <example>
 <problem>
-The sequence $\\{a_n\\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
+The sequence $\{a_n\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
 </problem>
 <answer>$2^{18}+1$</answer>
 <output>
@@ -236,7 +236,7 @@ The sequence $\\{a_n\\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
 <answer>{answer}</answer>
 """
 
-ANSWERLESS_PROOF_PROMPT = """<task>
+ANSWERLESS_PROOF_PROMPT = r"""<task>
 Rewrite a math problem as a proof problem without using or seeing its answer.
 </task>
 
@@ -251,7 +251,7 @@ problem. Do not guess or include the answer. Do not include a solution or explan
 
 <example>
 <problem>
-The sequence $\\{a_n\\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
+The sequence $\{a_n\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
 </problem>
 <output>
 {"problem": "Prove that there exists a value of $a_{10}$ for the sequence $\\{a_n\\}$ satisfying $a_1=2$ and $a_{n+1}=4a_n-3$."}
@@ -286,56 +286,8 @@ def parse_yes_no(answer: str) -> bool:
 
 def parse_json_object(answer: str) -> dict[str, Any]:
     """Parse a JSON object from a model response."""
-    text = answer.strip()
-    if text.startswith('```'):
-        lines = text.splitlines()
-        if lines and lines[0].startswith('```'):
-            lines = lines[1:]
-        if lines and lines[-1].startswith('```'):
-            lines = lines[:-1]
-        text = '\n'.join(lines).strip()
+    return json.loads(answer.strip())
 
-    start = text.find('{')
-    end = text.rfind('}')
-    if start == -1 or end == -1 or end < start:
-        raise ValueError(f'Expected JSON object, got: {answer!r}')
-
-    json_text = text[start:end + 1]
-    try:
-        return json.loads(json_text)
-    except json.JSONDecodeError:
-        return json.loads(escape_invalid_json_backslashes(json_text))
-
-
-def escape_invalid_json_backslashes(text: str) -> str:
-    """Escape LaTeX-style backslashes that are invalid in JSON strings."""
-    valid_escapes = {'"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'}
-    escaped = []
-    ix = 0
-
-    while ix < len(text):
-        char = text[ix]
-        if char != '\\':
-            escaped.append(char)
-            ix += 1
-            continue
-
-        if ix + 1 >= len(text):
-            escaped.append('\\\\')
-            ix += 1
-            continue
-
-        next_char = text[ix + 1]
-        if next_char in valid_escapes:
-            escaped.append(char)
-            escaped.append(next_char)
-            ix += 2
-            continue
-
-        escaped.append('\\\\')
-        ix += 1
-
-    return ''.join(escaped)
 
 def sample_json_object(
         prompt: str,
