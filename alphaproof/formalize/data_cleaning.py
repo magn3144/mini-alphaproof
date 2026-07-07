@@ -359,14 +359,34 @@ def selected_option_answer(record: dict) -> Any:
     """Return the selected MCQ option value when the answer is a simple label."""
     answer = record.get('answer')
     answer_label = str(answer).strip()
-    if not re.fullmatch(r'[A-D]', answer_label):
+
+    if re.fullmatch(r'[A-F]', answer_label):
+        option_pattern = re.compile(
+                r'(?:^|\s)([A-F])\s*:\s*(.*?)(?=\s+[A-F]\s*:|\s*$)',
+                re.DOTALL,
+        )
+        for label, option in option_pattern.findall(record['problem']):
+            if label == answer_label:
+                return option.strip()
+
+        return answer
+
+    if not re.fullmatch(r'[1-9]', answer_label):
         return answer
 
     option_pattern = re.compile(
-            r'(?:^|\s)([A-D])\s*:\s*(.*?)(?=\s+[A-D]\s*:|\s*$)',
+            r'(?:^|\s)'
+            r'(?:\(([1-9])\)|([1-9])\)|([1-9])\s*:|'
+            r'(?:[Oo]ption|[Aa]nswer,\s*option)\s+([1-9])\s*[:.]?)'
+            r'\s*(.*?)'
+            r'(?=\s+(?:\([1-9]\)|[1-9]\)|[1-9]\s*:|'
+            r'(?:[Oo]ption|[Aa]nswer,\s*option)\s+[1-9]\s*[:.]?)|\s*$)',
             re.DOTALL,
     )
-    for label, option in option_pattern.findall(record['problem']):
+    for parenthesized, closed, coloned, named, option in option_pattern.findall(
+            record['problem'],
+    ):
+        label = parenthesized or closed or coloned or named
         if label == answer_label:
             return option.strip()
 

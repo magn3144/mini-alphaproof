@@ -1,0 +1,2 @@
+- Add JSON schema to model in data cleaning pipeline
+- Test data cleaning script with timer and LLM otputs printed to see why it takes so long to execute.
