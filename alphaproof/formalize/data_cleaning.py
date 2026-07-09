@@ -465,6 +465,7 @@ def derived_record(
 ) -> dict:
     """Create a derived proof-problem row from an existing record."""
     derived = dict(record)
+    derived['source_id'] = record['id']
     derived['id'] = f'{record["id"]}__{suffix}'
     derived['problem'] = problem
     derived['question_type'] = f'derived_from_{record["question_type"]}'
