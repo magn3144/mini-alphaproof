@@ -136,6 +136,11 @@ class Qwen3:
         }
         quantization_config = self._quantization_config()
         if quantization_config is not None:
+            if self.device.type == 'mps':
+                raise ValueError(
+                    'bitsandbytes quantization is not supported on Apple MPS. '
+                    'Use quantization=None and a smaller dtype such as float16.'
+                )
             kwargs['device_map'] = 'auto'
             kwargs['quantization_config'] = quantization_config
         return kwargs

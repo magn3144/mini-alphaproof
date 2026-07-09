@@ -3,8 +3,10 @@
 - Write implementations as simple as possible, reusing exsisting functionality and avoiding ovverly complicated structures.
 - The actual project is in "alphaproof/".
 - "pseudocode.py" is not part of the actual project. It is used as a guide for how to structure the code. The code in "alphaproof/" should closely follow the structure of "pseudocode.py".
-- When you want to use py_compile, dont place the cache files in this repo, its annoying.
+- When you want to use py_compile, dont place the cache files in this repo.
 - Always place imports at the top of files. Not inside functions.
+- Backward compatability doesnt matter, it just complicates the code unnecessarily.
+- Write code as simple as possible, without complicated structures and unnecessary fallbacks. If you can remove more code than you write as you complete a task, thats great.
 
 
 # Design choices

@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from alphaproof.formalize.filter_problems import FILTERED_NUMINA_MATH_1_5_PATH
@@ -531,6 +532,17 @@ def main(
     missing_information_rows = 0
     errored_rows = 0
     rows_written = 0
+    timers: dict[str, float] = {}
+
+    def add_timer(name: str, seconds: float) -> None:
+        timers[name] = timers.get(name, 0.0) + seconds
+
+    def timed(name: str, function: Any, *args: Any) -> Any:
+        start = perf_counter()
+        try:
+            return function(*args)
+        finally:
+            add_timer(name, perf_counter() - start)
 
     with input_path.open(encoding='utf-8') as input_file:
         with output_path.open('w', encoding='utf-8') as output_file:
@@ -539,16 +551,20 @@ def main(
                 if not line:
                     continue
 
+                row_start = perf_counter()
                 rows_read += 1
                 record = json.loads(line)
 
                 try:
-                    missing_information = has_missing_information(
+                    missing_information = timed(
+                            'has_missing_information',
+                            has_missing_information,
                             record['problem'],
                             qwen,
                     )
                 except Exception:
                     errored_rows += 1
+                    add_timer('row_iteration', perf_counter() - row_start)
                     continue
 
                 if missing_information:
@@ -558,6 +574,7 @@ def main(
                     )
                     missing_information_rows += 1
                     rows_written += 1
+                    add_timer('row_iteration', perf_counter() - row_start)
                     continue
 
                 try:
@@ -569,8 +586,18 @@ def main(
                         continue
 
                     if question_type == 'math-word-problem':
-                        if is_multi_part_problem(record['problem'], qwen):
-                            problems = split_into_several_problems(record, qwen)
+                        if timed(
+                                'is_multi_part_problem',
+                                is_multi_part_problem,
+                                record['problem'],
+                                qwen,
+                        ):
+                            problems = timed(
+                                    'split_into_several_problems',
+                                    split_into_several_problems,
+                                    record,
+                                    qwen,
+                            )
                         else:
                             problems = [
                                     {
@@ -580,7 +607,9 @@ def main(
                             ]
 
                         for problem_ix, split_problem in enumerate(problems):
-                            rows_written += add_proof_problem_rows(
+                            rows_written += timed(
+                                    'add_proof_problem_rows',
+                                    add_proof_problem_rows,
                                     record,
                                     split_problem['problem'],
                                     split_problem.get('answer'),
@@ -591,13 +620,27 @@ def main(
                         continue
 
                     if question_type == 'MCQ':
-                        if has_several_statements(record['problem'], qwen):
-                            problems = split_into_several_problems(record, qwen)
+                        if timed(
+                                'has_several_statements',
+                                has_several_statements,
+                                record['problem'],
+                                qwen,
+                        ):
+                            problems = timed(
+                                    'split_into_several_problems',
+                                    split_into_several_problems,
+                                    record,
+                                    qwen,
+                            )
                         else:
-                            problems = [remove_options(record, qwen)]
+                            problems = [
+                                    timed('remove_options', remove_options, record, qwen)
+                            ]
 
                         for problem_ix, split_problem in enumerate(problems):
-                            rows_written += add_proof_problem_rows(
+                            rows_written += timed(
+                                    'add_proof_problem_rows',
+                                    add_proof_problem_rows,
                                     record,
                                     split_problem['problem'],
                                     split_problem.get('answer'),
@@ -612,6 +655,8 @@ def main(
                 except Exception:
                     errored_rows += 1
                     continue
+                finally:
+                    add_timer('row_iteration', perf_counter() - row_start)
 
     print(
             'Finished data cleaning: '
@@ -620,6 +665,7 @@ def main(
             f'{errored_rows} errors, '
             f'{rows_written} rows written.'
     )
+    print(f'Timers: {timers}')
 
 
 if __name__ == '__main__':
