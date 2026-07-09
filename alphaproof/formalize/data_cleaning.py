@@ -499,6 +499,18 @@ def write_record(output_file: Any, record: dict) -> None:
     output_file.write(json.dumps(record, ensure_ascii=False) + '\n')
 
 
+def cleaned_record_with_metadata(
+        record: dict,
+        boolean_outputs: dict,
+        row_timings: dict[str, float],
+) -> dict:
+    """Return a cleaned output row with data-cleaning metadata attached."""
+    record_with_metadata = dict(record)
+    record_with_metadata['boolean_outputs'] = dict(boolean_outputs)
+    record_with_metadata['timings'] = dict(row_timings)
+    return record_with_metadata
+
+
 def source_id_is_cleaned(source_id: str, output_path: Path) -> bool:
     """Return whether source_id already exists in the cleaned dataset."""
     if not output_path.exists():
@@ -621,9 +633,14 @@ def clean_rows(
     row_summaries = []
     timers: dict[str, float] = {}
     cleaned_rows = 0
+    current_row_timings: dict[str, float] | None = None
 
     def add_timer(name: str, seconds: float) -> None:
         timers[name] = timers.get(name, 0.0) + seconds
+        if current_row_timings is not None:
+            current_row_timings[name] = (
+                    current_row_timings.get(name, 0.0) + seconds
+            )
 
     def timed(name: str, function: Any, *args: Any) -> Any:
         start = perf_counter()
@@ -655,9 +672,12 @@ def clean_rows(
                         'answer': record.get('answer'),
                         'boolean_outputs': {},
                         'json_outputs': {},
+                        'timings': {},
                 }
                 boolean_outputs = row_summary['boolean_outputs']
                 json_outputs = row_summary['json_outputs']
+                row_timings = row_summary['timings']
+                current_row_timings = row_timings
 
                 try:
                     missing_information, missing_information_answer = timed(
@@ -672,20 +692,29 @@ def clean_rows(
                     )
                 except Exception:
                     errored_rows += 1
-                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
+                    row_summaries.append(row_summary)
+                    current_row_timings = None
                     continue
 
                 if missing_information:
                     output_rows.append(failed_record(record, 'missing_information'))
                     missing_information_rows += 1
-                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
+                    row_summaries.append(row_summary)
                     new_output_rows = output_rows[output_start:]
                     for output_row in new_output_rows:
-                        write_record(output_file, output_row)
+                        write_record(
+                                output_file,
+                                cleaned_record_with_metadata(
+                                        output_row,
+                                        boolean_outputs,
+                                        row_timings,
+                                ),
+                        )
                     output_file.flush()
                     cleaned_rows += 1
+                    current_row_timings = None
                     continue
 
                 try:
@@ -790,14 +819,22 @@ def clean_rows(
                     errored_rows += 1
                     continue
                 finally:
-                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
+                    row_summaries.append(row_summary)
                     new_output_rows = output_rows[output_start:]
                     for output_row in new_output_rows:
-                        write_record(output_file, output_row)
+                        write_record(
+                                output_file,
+                                cleaned_record_with_metadata(
+                                        output_row,
+                                        boolean_outputs,
+                                        row_timings,
+                                ),
+                        )
                     if new_output_rows:
                         output_file.flush()
                         cleaned_rows += 1
+                    current_row_timings = None
 
     if print_summary:
         print(
