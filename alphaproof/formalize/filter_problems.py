@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 
 
@@ -83,27 +84,25 @@ def filter_numina_math_1_5(
     """Filter NuminaMath 1.5 and write selected problems to a new JSONL file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rows_written = 0
+    filtered_rows = []
     with input_path.open(encoding='utf-8') as input_file:
-        with output_path.open('w', encoding='utf-8') as output_file:
-            for row_ix, line in enumerate(input_file):
-                line = line.strip()
-                if not line:
-                    continue
+        for row_ix, line in enumerate(input_file):
+            line = line.strip()
+            if not line:
+                continue
 
-                record = json.loads(line)
-                if keep_record(record):
-                    problem_id = f'{DATASET_ID_PREFIX}_{row_ix:07d}'
-                    output_file.write(
-                            json.dumps(
-                                    filtered_record(record, problem_id),
-                                    ensure_ascii=False,
-                            )
-                            + '\n'
-                    )
-                    rows_written += 1
+            record = json.loads(line)
+            if keep_record(record):
+                problem_id = f'{DATASET_ID_PREFIX}_{row_ix:07d}'
+                filtered_rows.append(filtered_record(record, problem_id))
 
-    return rows_written
+    random.shuffle(filtered_rows)
+
+    with output_path.open('w', encoding='utf-8') as output_file:
+        for row in filtered_rows:
+            output_file.write(json.dumps(row, ensure_ascii=False) + '\n')
+
+    return len(filtered_rows)
 
 
 if __name__ == '__main__':

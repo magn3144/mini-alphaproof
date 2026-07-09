@@ -1,9 +1,11 @@
+import argparse
 import json
 import re
-import sys
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+
+import torch
 
 from alphaproof.formalize.filter_problems import FILTERED_NUMINA_MATH_1_5_PATH
 from alphaproof.formalize.qwen3 import Qwen3, Qwen3_8B
@@ -301,31 +303,49 @@ def sample_json_object(
             prompt,
             num_samples=1,
             max_new_tokens=max_new_tokens,
-            temperature=0.2,
-            top_p=0.9,
+            temperature=0.1,
+            top_p=0.2,
     )[0]
     return parse_json_object(answer)
 
 
-def has_missing_information(problem: str, model: Qwen3) -> bool:
-    """Return whether a problem is missing information needed downstream."""
+def has_missing_information(problem: str, model: Qwen3) -> tuple[bool, str]:
+    """Return whether a problem is missing information and the raw answer."""
     prompt = fill_prompt(MISSING_INFORMATION_PROMPT, problem=problem.strip())
-    answer = model.sample(prompt, num_samples=1, max_new_tokens=8)[0]
-    return parse_yes_no(answer)
+    answer = model.sample(
+            prompt,
+            num_samples=1,
+            max_new_tokens=8,
+            temperature=0.1,
+            top_p=0.2,
+    )[0]
+    return parse_yes_no(answer), answer
 
 
-def is_multi_part_problem(problem: str, model: Qwen3) -> bool:
-    """Return whether a problem should be split into multiple subproblems."""
+def is_multi_part_problem(problem: str, model: Qwen3) -> tuple[bool, str]:
+    """Return whether a problem should be split and the raw answer."""
     prompt = fill_prompt(MULTI_PART_PROMPT, problem=problem.strip())
-    answer = model.sample(prompt, num_samples=1, max_new_tokens=8)[0]
-    return parse_yes_no(answer)
+    answer = model.sample(
+            prompt,
+            num_samples=1,
+            max_new_tokens=8,
+            temperature=0.1,
+            top_p=0.2,
+    )[0]
+    return parse_yes_no(answer), answer
 
 
-def has_several_statements(problem: str, model: Qwen3) -> bool:
-    """Return whether MCQ options are separate statements."""
+def has_several_statements(problem: str, model: Qwen3) -> tuple[bool, str]:
+    """Return whether MCQ options are separate statements and the raw answer."""
     prompt = fill_prompt(SEVERAL_STATEMENTS_PROMPT, problem=problem.strip())
-    answer = model.sample(prompt, num_samples=1, max_new_tokens=8)[0]
-    return parse_yes_no(answer)
+    answer = model.sample(
+            prompt,
+            num_samples=1,
+            max_new_tokens=8,
+            temperature=0.1,
+            top_p=0.2,
+    )[0]
+    return parse_yes_no(answer), answer
 
 
 def split_into_several_problems(record: dict, model: Qwen3) -> list[dict]:
@@ -537,8 +557,7 @@ def data_cleaning_summary(
         missing_information_rows: int,
         errored_rows: int,
         output_rows: list[dict],
-        boolean_outputs: list[dict],
-        json_outputs: list[dict],
+        row_summaries: list[dict],
         timers: dict[str, float],
 ) -> str:
     """Return a formatted summary of a data cleaning run."""
@@ -554,11 +573,8 @@ def data_cleaning_summary(
                     f'  Errors: {errored_rows}',
                     f'  Rows written: {len(output_rows)}',
                     '',
-                    'Boolean function outputs:',
-                    json.dumps(boolean_outputs, ensure_ascii=False, indent=2),
-                    '',
-                    'JSON function outputs:',
-                    json.dumps(json_outputs, ensure_ascii=False, indent=2),
+                    'Row function outputs:',
+                    json.dumps(row_summaries, ensure_ascii=False, indent=2),
                     '',
                     'Timings:',
                     *timer_lines,
@@ -571,9 +587,28 @@ def clean_rows(
         input_path: Path = FILTERED_NUMINA_MATH_1_5_PATH,
         output_path: Path = CLEANED_NUMINA_MATH_1_5_PATH,
         print_summary: bool = False,
+        device: str | None = None,
+        torch_dtype: str = 'auto',
+        quantization: str | None = None,
 ) -> None:
     """Run the data cleaning pipeline over the filtered dataset."""
-    qwen = Qwen3_8B(quantization='8bit')
+    if device is not None:
+        model_device = torch.device(device)
+    elif torch.cuda.is_available():
+        model_device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        model_device = torch.device('mps')
+    else:
+        model_device = torch.device('cpu')
+
+    if torch_dtype == 'auto' and model_device is not None and model_device.type == 'mps':
+        torch_dtype = 'float16'
+    qwen = Qwen3_8B(
+            device=model_device,
+            torch_dtype=torch_dtype,
+            enable_thinking=False,
+            quantization=quantization,
+    )
     qwen.load()
     print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
 
@@ -583,8 +618,7 @@ def clean_rows(
     missing_information_rows = 0
     errored_rows = 0
     output_rows = []
-    boolean_outputs = []
-    json_outputs = []
+    row_summaries = []
     timers: dict[str, float] = {}
     cleaned_rows = 0
 
@@ -609,34 +643,43 @@ def clean_rows(
 
                 row_start = perf_counter()
                 record = json.loads(line)
-                if source_id_is_cleaned(record['source_id'], output_path):
+                if source_id_is_cleaned(record['id'], output_path):
                     continue
 
                 rows_read += 1
                 output_start = len(output_rows)
-                boolean_output = {'id': record.get('id')}
-                json_output = {'id': record.get('id')}
+                row_summary = {
+                        'id': record.get('id'),
+                        'question_type': record.get('question_type'),
+                        'problem': record.get('problem'),
+                        'answer': record.get('answer'),
+                        'boolean_outputs': {},
+                        'json_outputs': {},
+                }
+                boolean_outputs = row_summary['boolean_outputs']
+                json_outputs = row_summary['json_outputs']
 
                 try:
-                    missing_information = timed(
+                    missing_information, missing_information_answer = timed(
                             'has_missing_information',
                             has_missing_information,
                             record['problem'],
                             qwen,
                     )
-                    boolean_output['has_missing_information'] = missing_information
+                    boolean_outputs['has_missing_information'] = missing_information
+                    boolean_outputs['has_missing_information_answer'] = (
+                            missing_information_answer
+                    )
                 except Exception:
                     errored_rows += 1
-                    boolean_outputs.append(boolean_output)
-                    json_outputs.append(json_output)
+                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
                     continue
 
                 if missing_information:
                     output_rows.append(failed_record(record, 'missing_information'))
                     missing_information_rows += 1
-                    boolean_outputs.append(boolean_output)
-                    json_outputs.append(json_output)
+                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
                     new_output_rows = output_rows[output_start:]
                     for output_row in new_output_rows:
@@ -653,13 +696,16 @@ def clean_rows(
                         continue
 
                     if question_type == 'math-word-problem':
-                        is_multi_part = timed(
+                        is_multi_part, is_multi_part_answer = timed(
                                 'is_multi_part_problem',
                                 is_multi_part_problem,
                                 record['problem'],
                                 qwen,
                         )
-                        boolean_output['is_multi_part_problem'] = is_multi_part
+                        boolean_outputs['is_multi_part_problem'] = is_multi_part
+                        boolean_outputs['is_multi_part_problem_answer'] = (
+                                is_multi_part_answer
+                        )
                         if is_multi_part:
                             problems = timed(
                                     'split_into_several_problems',
@@ -667,7 +713,7 @@ def clean_rows(
                                     record,
                                     qwen,
                             )
-                            json_output['split_into_several_problems'] = problems
+                            json_outputs['split_into_several_problems'] = problems
                         else:
                             problems = [
                                     {
@@ -686,7 +732,7 @@ def clean_rows(
                                     qwen,
                                     f'part_{problem_ix}',
                             )
-                            json_output.setdefault(
+                            json_outputs.setdefault(
                                     'add_proof_problem_rows',
                                     [],
                             ).extend(proof_rows)
@@ -694,13 +740,16 @@ def clean_rows(
                         continue
 
                     if question_type == 'MCQ':
-                        several_statements = timed(
+                        several_statements, several_statements_answer = timed(
                                 'has_several_statements',
                                 has_several_statements,
                                 record['problem'],
                                 qwen,
                         )
-                        boolean_output['has_several_statements'] = several_statements
+                        boolean_outputs['has_several_statements'] = several_statements
+                        boolean_outputs['has_several_statements_answer'] = (
+                                several_statements_answer
+                        )
                         if several_statements:
                             problems = timed(
                                     'split_into_several_problems',
@@ -708,7 +757,7 @@ def clean_rows(
                                     record,
                                     qwen,
                             )
-                            json_output['split_into_several_problems'] = problems
+                            json_outputs['split_into_several_problems'] = problems
                         else:
                             removed_options = timed(
                                     'remove_options',
@@ -716,7 +765,7 @@ def clean_rows(
                                     record,
                                     qwen,
                             )
-                            json_output['remove_options'] = removed_options
+                            json_outputs['remove_options'] = removed_options
                             problems = [removed_options]
 
                         for problem_ix, split_problem in enumerate(problems):
@@ -729,7 +778,7 @@ def clean_rows(
                                     qwen,
                                     f'mcq_{problem_ix}',
                             )
-                            json_output.setdefault(
+                            json_outputs.setdefault(
                                     'add_proof_problem_rows',
                                     [],
                             ).extend(proof_rows)
@@ -741,8 +790,7 @@ def clean_rows(
                     errored_rows += 1
                     continue
                 finally:
-                    boolean_outputs.append(boolean_output)
-                    json_outputs.append(json_output)
+                    row_summaries.append(row_summary)
                     add_timer('row_iteration', perf_counter() - row_start)
                     new_output_rows = output_rows[output_start:]
                     for output_row in new_output_rows:
@@ -758,12 +806,31 @@ def clean_rows(
                         missing_information_rows,
                         errored_rows,
                         output_rows,
-                        boolean_outputs,
-                        json_outputs,
+                        row_summaries,
                         timers,
                 )
         )
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for data cleaning."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('rows_to_clean', type=int)
+    parser.add_argument('--summary', action='store_true')
+    parser.add_argument('--output-path', type=Path, default=CLEANED_NUMINA_MATH_1_5_PATH)
+    parser.add_argument('--device', choices=['cpu', 'mps', 'cuda'])
+    parser.add_argument('--torch-dtype', default='auto')
+    parser.add_argument('--quantization', choices=['4bit', '8bit'])
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    clean_rows(int(sys.argv[1]))
+    args = parse_args()
+    clean_rows(
+            args.rows_to_clean,
+            output_path=args.output_path,
+            print_summary=args.summary,
+            device=args.device,
+            torch_dtype=args.torch_dtype,
+            quantization=args.quantization,
+    )
