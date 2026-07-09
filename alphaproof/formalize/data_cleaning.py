@@ -276,6 +276,11 @@ def fill_prompt(template: str, **values: str) -> str:
     return prompt
 
 
+def json_prompt_text(value: Any) -> str:
+    """Return value as JSON text for prompts that ask for JSON output."""
+    return json.dumps(value, ensure_ascii=False)
+
+
 def parse_yes_no(answer: str) -> bool:
     """Parse a YES/NO model response."""
     normalized_answer = answer.strip().upper()
@@ -288,9 +293,24 @@ def parse_yes_no(answer: str) -> bool:
     raise ValueError(f'Expected YES or NO, got: {answer!r}')
 
 
+class InvalidJsonOutput(ValueError):
+    """Raised when the model output cannot be parsed as JSON."""
+
+    def __init__(self, output: str, error: json.JSONDecodeError):
+        self.output = output
+        message = (
+                f'Expected valid JSON, got parse error at line {error.lineno} '
+                f'column {error.colno}: {error.msg}'
+        )
+        super().__init__(message)
+
+
 def parse_json_object(answer: str) -> dict[str, Any]:
     """Parse a JSON object from a model response."""
-    return json.loads(answer.strip())
+    try:
+        return json.loads(answer.strip())
+    except json.JSONDecodeError as error:
+        raise InvalidJsonOutput(answer, error) from error
 
 
 def sample_json_object(
@@ -352,8 +372,8 @@ def split_into_several_problems(record: dict, model: Qwen3) -> list[dict]:
     """Split a record into standalone problem/answer pairs."""
     prompt = fill_prompt(
             SPLIT_PROBLEM_PROMPT,
-            problem=record['problem'].strip(),
-            answer=str(record.get('answer')),
+            problem=json_prompt_text(record['problem'].strip()),
+            answer=json_prompt_text(record.get('answer')),
     )
     parsed = sample_json_object(prompt, model, max_new_tokens=2048)
     problems = parsed.get('problems')
@@ -419,7 +439,7 @@ def remove_options(record: dict, model: Qwen3) -> dict:
     """Convert a normal MCQ into a direct problem with a direct answer."""
     prompt = fill_prompt(
             REMOVE_OPTIONS_PROMPT,
-            problem=record['problem'].strip(),
+            problem=json_prompt_text(record['problem'].strip()),
     )
     parsed = sample_json_object(prompt, model)
     problem = parsed.get('problem')
@@ -442,8 +462,8 @@ def proof_problem_with_answer(
 
     prompt = fill_prompt(
             ANSWER_PROOF_PROMPT,
-            problem=problem.strip(),
-            answer=str(answer).strip(),
+            problem=json_prompt_text(problem.strip()),
+            answer=json_prompt_text(str(answer).strip()),
     )
     parsed = sample_json_object(prompt, model)
     proof_problem = parsed.get('problem')
@@ -454,7 +474,10 @@ def proof_problem_with_answer(
 
 def proof_problem_without_answer(problem: str, model: Qwen3) -> str:
     """Create a proof problem without exposing the answer to the model."""
-    prompt = fill_prompt(ANSWERLESS_PROOF_PROMPT, problem=problem.strip())
+    prompt = fill_prompt(
+            ANSWERLESS_PROOF_PROMPT,
+            problem=json_prompt_text(problem.strip()),
+    )
     parsed = sample_json_object(prompt, model)
     proof_problem = parsed.get('problem')
     if not isinstance(proof_problem, str) or not proof_problem.strip():
@@ -465,6 +488,7 @@ def proof_problem_without_answer(problem: str, model: Qwen3) -> str:
 def failed_record(record: dict, reason: str) -> dict:
     """Return a cleaned dataset row for a problem that cannot continue."""
     cleaned_record = dict(record)
+    cleaned_record['source_id'] = record['id']
     cleaned_record['FAILED'] = reason
     cleaned_record['theorem'] = None
     return cleaned_record
@@ -473,6 +497,7 @@ def failed_record(record: dict, reason: str) -> dict:
 def formalization_record(record: dict) -> dict:
     """Return a cleaned dataset row ready for later formalization."""
     cleaned_record = dict(record)
+    cleaned_record.setdefault('source_id', record['id'])
     cleaned_record['FAILED'] = None
     cleaned_record['theorem'] = None
     return cleaned_record
@@ -499,16 +524,57 @@ def write_record(output_file: Any, record: dict) -> None:
     output_file.write(json.dumps(record, ensure_ascii=False) + '\n')
 
 
+def ensure_append_starts_on_new_line(output_path: Path) -> None:
+    """Ensure appending a JSONL row starts on a fresh line."""
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        return
+
+    with output_path.open('rb+') as output_file:
+        output_file.seek(-1, 2)
+        if output_file.read(1) != b'\n':
+            output_file.write(b'\n')
+
+
 def cleaned_record_with_metadata(
         record: dict,
         boolean_outputs: dict,
+        json_outputs: dict,
         row_timings: dict[str, float],
+        error: str | None,
 ) -> dict:
     """Return a cleaned output row with data-cleaning metadata attached."""
     record_with_metadata = dict(record)
     record_with_metadata['boolean_outputs'] = dict(boolean_outputs)
     record_with_metadata['timings'] = dict(row_timings)
+    if error is not None:
+        record_with_metadata['error'] = error
+    if error is not None and json_outputs:
+        record_with_metadata['json_outputs'] = dict(json_outputs)
     return record_with_metadata
+
+
+def exception_message(error: Exception) -> str:
+    """Return a compact exception message for saved row metadata."""
+    return f'{type(error).__name__}: {error}'
+
+
+def record_error(row_summary: dict, error: Exception) -> None:
+    """Attach exception details to the row summary."""
+    row_summary['error'] = exception_message(error)
+    if isinstance(error, InvalidJsonOutput):
+        row_summary['json_outputs']['invalid_json_output'] = error.output
+
+
+def raw_error_record(line: str, error: Exception) -> dict:
+    """Return a failed row for an input line that could not be read."""
+    return {
+            'id': None,
+            'source_id': None,
+            'raw_input': line,
+            'FAILED': 'error',
+            'theorem': None,
+            'error': exception_message(error),
+    }
 
 
 def source_id_is_cleaned(source_id: str, output_path: Path) -> bool:
@@ -521,8 +587,11 @@ def source_id_is_cleaned(source_id: str, output_path: Path) -> bool:
             line = line.strip()
             if not line:
                 continue
-            cleaned_record = json.loads(line)
-            if cleaned_record['source_id'] == source_id:
+            try:
+                cleaned_record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if cleaned_record.get('source_id') == source_id:
                 return True
 
     return False
@@ -625,6 +694,7 @@ def clean_rows(
     print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_append_starts_on_new_line(output_path)
 
     rows_read = 0
     missing_information_rows = 0
@@ -659,8 +729,32 @@ def clean_rows(
                     break
 
                 row_start = perf_counter()
-                record = json.loads(line)
-                if source_id_is_cleaned(record['id'], output_path):
+                try:
+                    record = json.loads(line)
+                    if source_id_is_cleaned(record['id'], output_path):
+                        continue
+                except Exception as error:
+                    row_timings = {'row_iteration': perf_counter() - row_start}
+                    row_summary = {
+                            'id': None,
+                            'question_type': None,
+                            'problem': None,
+                            'answer': None,
+                            'raw_input': line,
+                            'boolean_outputs': {},
+                            'json_outputs': {},
+                            'error': exception_message(error),
+                            'timings': row_timings,
+                    }
+                    output_row = raw_error_record(line, error)
+                    output_rows.append(output_row)
+                    row_summaries.append(row_summary)
+                    write_record(output_file, output_row)
+                    output_file.flush()
+                    rows_read += 1
+                    errored_rows += 1
+                    cleaned_rows += 1
+                    add_timer('row_iteration', row_timings['row_iteration'])
                     continue
 
                 rows_read += 1
@@ -672,6 +766,7 @@ def clean_rows(
                         'answer': record.get('answer'),
                         'boolean_outputs': {},
                         'json_outputs': {},
+                        'error': None,
                         'timings': {},
                 }
                 boolean_outputs = row_summary['boolean_outputs']
@@ -690,10 +785,26 @@ def clean_rows(
                     boolean_outputs['has_missing_information_answer'] = (
                             missing_information_answer
                     )
-                except Exception:
+                except Exception as error:
+                    record_error(row_summary, error)
+                    output_rows.append(failed_record(record, 'error'))
                     errored_rows += 1
                     add_timer('row_iteration', perf_counter() - row_start)
                     row_summaries.append(row_summary)
+                    new_output_rows = output_rows[output_start:]
+                    for output_row in new_output_rows:
+                        write_record(
+                                output_file,
+                                cleaned_record_with_metadata(
+                                        output_row,
+                                        boolean_outputs,
+                                        json_outputs,
+                                        row_timings,
+                                        row_summary['error'],
+                                ),
+                        )
+                    output_file.flush()
+                    cleaned_rows += 1
                     current_row_timings = None
                     continue
 
@@ -709,7 +820,9 @@ def clean_rows(
                                 cleaned_record_with_metadata(
                                         output_row,
                                         boolean_outputs,
+                                        json_outputs,
                                         row_timings,
+                                        row_summary['error'],
                                 ),
                         )
                     output_file.flush()
@@ -815,7 +928,9 @@ def clean_rows(
                         continue
 
                     output_rows.append(failed_record(record, 'unsupported_type'))
-                except Exception:
+                except Exception as error:
+                    record_error(row_summary, error)
+                    output_rows.append(failed_record(record, 'error'))
                     errored_rows += 1
                     continue
                 finally:
@@ -828,7 +943,9 @@ def clean_rows(
                                 cleaned_record_with_metadata(
                                         output_row,
                                         boolean_outputs,
+                                        json_outputs,
                                         row_timings,
+                                        row_summary['error'],
                                 ),
                         )
                     if new_output_rows:
