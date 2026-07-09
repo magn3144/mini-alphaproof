@@ -483,15 +483,13 @@ def add_proof_problem_rows(
         problem: str,
         answer: Any,
         model: Qwen3,
-        output_file: Any,
         suffix: str,
-) -> int:
-    """Write answer-aware and answer-free proof problem rows."""
-    rows_written = 0
+) -> list[dict]:
+    """Return answer-aware and answer-free proof problem rows."""
+    rows = []
     if answer is not None and str(answer).strip() != '':
         with_answer = proof_problem_with_answer(problem, answer, model)
-        write_record(
-                output_file,
+        rows.append(
                 formalization_record(
                         derived_record(
                                 record,
@@ -501,11 +499,9 @@ def add_proof_problem_rows(
                         )
                 ),
         )
-        rows_written += 1
 
     without_answer = proof_problem_without_answer(problem, model)
-    write_record(
-            output_file,
+    rows.append(
             formalization_record(
                     derived_record(
                             record,
@@ -515,10 +511,44 @@ def add_proof_problem_rows(
                     )
             ),
     )
-    rows_written += 1
-    return rows_written
+    return rows
 
-def main(
+
+def data_cleaning_summary(
+        rows_read: int,
+        missing_information_rows: int,
+        errored_rows: int,
+        output_rows: list[dict],
+        boolean_outputs: list[dict],
+        json_outputs: list[dict],
+        timers: dict[str, float],
+) -> str:
+    """Return a formatted summary of a data cleaning run."""
+    timer_lines = [
+            f'  {name}: {seconds:.3f}s'
+            for name, seconds in sorted(timers.items())
+    ]
+    return '\n'.join(
+            [
+                    'Finished data cleaning:',
+                    f'  Rows read: {rows_read}',
+                    f'  Missing information rows: {missing_information_rows}',
+                    f'  Errors: {errored_rows}',
+                    f'  Rows written: {len(output_rows)}',
+                    '',
+                    'Boolean function outputs:',
+                    json.dumps(boolean_outputs, ensure_ascii=False, indent=2),
+                    '',
+                    'JSON function outputs:',
+                    json.dumps(json_outputs, ensure_ascii=False, indent=2),
+                    '',
+                    'Timings:',
+                    *timer_lines,
+            ]
+    )
+
+
+def clean_rows(
         input_path: Path = FILTERED_NUMINA_MATH_1_5_PATH,
         output_path: Path = CLEANED_NUMINA_MATH_1_5_PATH,
 ) -> None:
@@ -532,7 +562,9 @@ def main(
     rows_read = 0
     missing_information_rows = 0
     errored_rows = 0
-    rows_written = 0
+    output_rows = []
+    boolean_outputs = []
+    json_outputs = []
     timers: dict[str, float] = {}
 
     def add_timer(name: str, seconds: float) -> None:
@@ -546,128 +578,156 @@ def main(
             add_timer(name, perf_counter() - start)
 
     with input_path.open(encoding='utf-8') as input_file:
-        with output_path.open('w', encoding='utf-8') as output_file:
-            for line in input_file:
-                line = line.strip()
-                if not line:
+        for line in input_file:
+            line = line.strip()
+            if not line:
+                continue
+
+            row_start = perf_counter()
+            rows_read += 1
+            record = json.loads(line)
+            boolean_output = {'id': record.get('id')}
+            json_output = {'id': record.get('id')}
+
+            try:
+                missing_information = timed(
+                        'has_missing_information',
+                        has_missing_information,
+                        record['problem'],
+                        qwen,
+                )
+                boolean_output['has_missing_information'] = missing_information
+            except Exception:
+                errored_rows += 1
+                boolean_outputs.append(boolean_output)
+                json_outputs.append(json_output)
+                add_timer('row_iteration', perf_counter() - row_start)
+                continue
+
+            if missing_information:
+                output_rows.append(failed_record(record, 'missing_information'))
+                missing_information_rows += 1
+                boolean_outputs.append(boolean_output)
+                json_outputs.append(json_output)
+                add_timer('row_iteration', perf_counter() - row_start)
+                continue
+
+            try:
+                question_type = record.get('question_type')
+
+                if question_type == 'proof':
+                    output_rows.append(formalization_record(record))
                     continue
 
-                row_start = perf_counter()
-                rows_read += 1
-                record = json.loads(line)
-
-                try:
-                    missing_information = timed(
-                            'has_missing_information',
-                            has_missing_information,
+                if question_type == 'math-word-problem':
+                    is_multi_part = timed(
+                            'is_multi_part_problem',
+                            is_multi_part_problem,
                             record['problem'],
                             qwen,
                     )
-                except Exception:
-                    errored_rows += 1
-                    add_timer('row_iteration', perf_counter() - row_start)
+                    boolean_output['is_multi_part_problem'] = is_multi_part
+                    if is_multi_part:
+                        problems = timed(
+                                'split_into_several_problems',
+                                split_into_several_problems,
+                                record,
+                                qwen,
+                        )
+                        json_output['split_into_several_problems'] = problems
+                    else:
+                        problems = [
+                                {
+                                        'problem': record['problem'],
+                                        'answer': record.get('answer'),
+                                }
+                        ]
+
+                    for problem_ix, split_problem in enumerate(problems):
+                        proof_rows = timed(
+                                'add_proof_problem_rows',
+                                add_proof_problem_rows,
+                                record,
+                                split_problem['problem'],
+                                split_problem.get('answer'),
+                                qwen,
+                                f'part_{problem_ix}',
+                        )
+                        json_output.setdefault(
+                                'add_proof_problem_rows',
+                                [],
+                        ).extend(proof_rows)
+                        output_rows.extend(proof_rows)
                     continue
 
-                if missing_information:
-                    write_record(
-                            output_file,
-                            failed_record(record, 'missing_information'),
+                if question_type == 'MCQ':
+                    several_statements = timed(
+                            'has_several_statements',
+                            has_several_statements,
+                            record['problem'],
+                            qwen,
                     )
-                    missing_information_rows += 1
-                    rows_written += 1
-                    add_timer('row_iteration', perf_counter() - row_start)
+                    boolean_output['has_several_statements'] = several_statements
+                    if several_statements:
+                        problems = timed(
+                                'split_into_several_problems',
+                                split_into_several_problems,
+                                record,
+                                qwen,
+                        )
+                        json_output['split_into_several_problems'] = problems
+                    else:
+                        removed_options = timed(
+                                'remove_options',
+                                remove_options,
+                                record,
+                                qwen,
+                        )
+                        json_output['remove_options'] = removed_options
+                        problems = [removed_options]
+
+                    for problem_ix, split_problem in enumerate(problems):
+                        proof_rows = timed(
+                                'add_proof_problem_rows',
+                                add_proof_problem_rows,
+                                record,
+                                split_problem['problem'],
+                                split_problem.get('answer'),
+                                qwen,
+                                f'mcq_{problem_ix}',
+                        )
+                        json_output.setdefault(
+                                'add_proof_problem_rows',
+                                [],
+                        ).extend(proof_rows)
+                        output_rows.extend(proof_rows)
                     continue
 
-                try:
-                    question_type = record.get('question_type')
+                output_rows.append(failed_record(record, 'unsupported_type'))
+            except Exception:
+                errored_rows += 1
+                continue
+            finally:
+                boolean_outputs.append(boolean_output)
+                json_outputs.append(json_output)
+                add_timer('row_iteration', perf_counter() - row_start)
 
-                    if question_type == 'proof':
-                        write_record(output_file, formalization_record(record))
-                        rows_written += 1
-                        continue
-
-                    if question_type == 'math-word-problem':
-                        if timed(
-                                'is_multi_part_problem',
-                                is_multi_part_problem,
-                                record['problem'],
-                                qwen,
-                        ):
-                            problems = timed(
-                                    'split_into_several_problems',
-                                    split_into_several_problems,
-                                    record,
-                                    qwen,
-                            )
-                        else:
-                            problems = [
-                                    {
-                                            'problem': record['problem'],
-                                            'answer': record.get('answer'),
-                                    }
-                            ]
-
-                        for problem_ix, split_problem in enumerate(problems):
-                            rows_written += timed(
-                                    'add_proof_problem_rows',
-                                    add_proof_problem_rows,
-                                    record,
-                                    split_problem['problem'],
-                                    split_problem.get('answer'),
-                                    qwen,
-                                    output_file,
-                                    f'part_{problem_ix}',
-                            )
-                        continue
-
-                    if question_type == 'MCQ':
-                        if timed(
-                                'has_several_statements',
-                                has_several_statements,
-                                record['problem'],
-                                qwen,
-                        ):
-                            problems = timed(
-                                    'split_into_several_problems',
-                                    split_into_several_problems,
-                                    record,
-                                    qwen,
-                            )
-                        else:
-                            problems = [
-                                    timed('remove_options', remove_options, record, qwen)
-                            ]
-
-                        for problem_ix, split_problem in enumerate(problems):
-                            rows_written += timed(
-                                    'add_proof_problem_rows',
-                                    add_proof_problem_rows,
-                                    record,
-                                    split_problem['problem'],
-                                    split_problem.get('answer'),
-                                    qwen,
-                                    output_file,
-                                    f'mcq_{problem_ix}',
-                            )
-                        continue
-
-                    write_record(output_file, failed_record(record, 'unsupported_type'))
-                    rows_written += 1
-                except Exception:
-                    errored_rows += 1
-                    continue
-                finally:
-                    add_timer('row_iteration', perf_counter() - row_start)
+    with output_path.open('w', encoding='utf-8') as output_file:
+        for output_row in output_rows:
+            write_record(output_file, output_row)
 
     print(
-            'Finished data cleaning: '
-            f'{rows_read} rows read, '
-            f'{missing_information_rows} marked missing information, '
-            f'{errored_rows} errors, '
-            f'{rows_written} rows written.'
+            data_cleaning_summary(
+                    rows_read,
+                    missing_information_rows,
+                    errored_rows,
+                    output_rows,
+                    boolean_outputs,
+                    json_outputs,
+                    timers,
+            )
     )
-    print(f'Timers: {timers}')
 
 
 if __name__ == '__main__':
-    main()
+    clean_rows()
