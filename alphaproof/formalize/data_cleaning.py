@@ -1,6 +1,5 @@
 import argparse
 import json
-import re
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -183,13 +182,16 @@ Convert a multiple-choice math problem into a direct math word problem.
 <instructions>
 Return only valid JSON.
 Use this exact schema:
-{"problem": "self-contained problem text without option labels"}
+{"problem": "self-contained problem text without option labels", "answer": "selected option value"}
 
 Rephrase the MCQ problem statement as a math-word-problem such that the answer
 option labels are removed. Make sure the resulting math-word-problem is self
 contained. If information from the options is needed to make the problem self
 contained, include that information in the rewritten problem without mentioning
 which option is correct.
+Return the answer as the text/value of the selected option, not as an option
+label. If the provided answer is already a direct answer instead of an option
+label, return it unchanged.
 </instructions>
 
 <example>
@@ -200,14 +202,16 @@ B: $\frac{2}{7}$
 C: $\sqrt{0.04}$
 D: $\pi - 3.14$
 </problem>
+<answer>D</answer>
 <output>
-{"problem": "Determine which of the numbers $3.14$, $\\frac{2}{7}$, $\\sqrt{0.04}$, and $\\pi - 3.14$ is irrational."}
+{"problem": "Determine which of the numbers $3.14$, $\\frac{2}{7}$, $\\sqrt{0.04}$, and $\\pi - 3.14$ is irrational.", "answer": "$\\pi - 3.14$"}
 </output>
 </example>
 
 <problem>
 {problem}
 </problem>
+<answer>{answer}</answer>
 """
 
 ANSWER_PROOF_PROMPT = r"""<task>
@@ -397,57 +401,20 @@ def split_into_several_problems(record: dict, model: Qwen3) -> list[dict]:
     return split_problems
 
 
-def selected_option_answer(record: dict) -> Any:
-    """Return the selected MCQ option value when the answer is a simple label."""
-    answer = record.get('answer')
-    answer_label = str(answer).strip()
-
-    if re.fullmatch(r'[A-F]', answer_label):
-        option_pattern = re.compile(
-                r'(?:^|\s)([A-F])\s*:\s*(.*?)(?=\s+[A-F]\s*:|\s*$)',
-                re.DOTALL,
-        )
-        for label, option in option_pattern.findall(record['problem']):
-            if label == answer_label:
-                return option.strip()
-
-        return answer
-
-    if not re.fullmatch(r'[1-9]', answer_label):
-        return answer
-
-    option_pattern = re.compile(
-            r'(?:^|\s)'
-            r'(?:\(([1-9])\)|([1-9])\)|([1-9])\s*:|'
-            r'(?:[Oo]ption|[Aa]nswer,\s*option)\s+([1-9])\s*[:.]?)'
-            r'\s*(.*?)'
-            r'(?=\s+(?:\([1-9]\)|[1-9]\)|[1-9]\s*:|'
-            r'(?:[Oo]ption|[Aa]nswer,\s*option)\s+[1-9]\s*[:.]?)|\s*$)',
-            re.DOTALL,
-    )
-    for parenthesized, closed, coloned, named, option in option_pattern.findall(
-            record['problem'],
-    ):
-        label = parenthesized or closed or coloned or named
-        if label == answer_label:
-            return option.strip()
-
-    return answer
-
-
 def remove_options(record: dict, model: Qwen3) -> dict:
     """Convert a normal MCQ into a direct problem with a direct answer."""
     prompt = fill_prompt(
             REMOVE_OPTIONS_PROMPT,
             problem=json_prompt_text(record['problem'].strip()),
+            answer=json_prompt_text(record.get('answer')),
     )
     parsed = sample_json_object(prompt, model)
     problem = parsed.get('problem')
-    answer = selected_option_answer(record)
+    answer = parsed.get('answer')
     if not isinstance(problem, str) or not problem.strip():
         raise ValueError(f'Expected problem text, got: {parsed!r}')
     if answer is None or str(answer).strip() == '':
-        raise ValueError(f'Expected selected answer, got: {record!r}')
+        raise ValueError(f'Expected selected answer, got: {parsed!r}')
     return {'problem': problem.strip(), 'answer': answer}
 
 
