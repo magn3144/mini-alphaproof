@@ -119,6 +119,11 @@ class Qwen3:
     def _clean_completion(self, completion: str) -> str:
         """Remove Qwen3 thinking markup when present."""
         end_tag = '</think>'
+        if '<think>' in completion and end_tag not in completion:
+            raise RuntimeError(
+                'Model thinking did not finish before max_new_tokens. '
+                'Increase max_new_tokens for this sample.'
+            )
         if end_tag in completion:
             completion = completion.split(end_tag, maxsplit=1)[1]
         return completion.strip()

@@ -14,6 +14,12 @@ from alphaproof.formalize.qwen3 import Qwen3, Qwen3_8B
 CLEANED_NUMINA_MATH_1_5_PATH = (
         FILTERED_NUMINA_MATH_1_5_PATH.parent / 'numina_math_1_5_cleaned.jsonl'
 )
+BOOLEAN_MAX_NEW_TOKENS = 8
+JSON_MAX_NEW_TOKENS = 1024
+SPLIT_MAX_NEW_TOKENS = 2048
+THINKING_BOOLEAN_MAX_NEW_TOKENS = 4096
+THINKING_JSON_MAX_NEW_TOKENS = 16384
+THINKING_SPLIT_MAX_NEW_TOKENS = 32768
 
 MISSING_INFORMATION_PROMPT = r"""<task>
 Decide whether a math problem is missing information needed to solve or formalize it.
@@ -318,16 +324,32 @@ def parse_json_object(answer: str) -> dict[str, Any]:
         raise InvalidJsonOutput(answer, error) from error
 
 
+def max_tokens_for_model(
+        model: Qwen3,
+        max_new_tokens: int,
+        thinking_max_new_tokens: int,
+) -> int:
+    """Return a larger generation budget when thinking is enabled."""
+    if getattr(model, 'enable_thinking', False):
+        return thinking_max_new_tokens
+    return max_new_tokens
+
+
 def sample_json_object(
         prompt: str,
         model: Qwen3,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = JSON_MAX_NEW_TOKENS,
+        thinking_max_new_tokens: int = THINKING_JSON_MAX_NEW_TOKENS,
 ) -> dict[str, Any]:
     """Sample and parse one JSON object from the model."""
     answer = model.sample(
             prompt,
             num_samples=1,
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=max_tokens_for_model(
+                    model,
+                    max_new_tokens,
+                    thinking_max_new_tokens,
+            ),
             temperature=0.1,
             top_p=0.2,
     )[0]
@@ -340,7 +362,11 @@ def has_missing_information(problem: str, model: Qwen3) -> tuple[bool, str]:
     answer = model.sample(
             prompt,
             num_samples=1,
-            max_new_tokens=8,
+            max_new_tokens=max_tokens_for_model(
+                    model,
+                    BOOLEAN_MAX_NEW_TOKENS,
+                    THINKING_BOOLEAN_MAX_NEW_TOKENS,
+            ),
             temperature=0.1,
             top_p=0.2,
     )[0]
@@ -353,7 +379,11 @@ def is_multi_part_problem(problem: str, model: Qwen3) -> tuple[bool, str]:
     answer = model.sample(
             prompt,
             num_samples=1,
-            max_new_tokens=8,
+            max_new_tokens=max_tokens_for_model(
+                    model,
+                    BOOLEAN_MAX_NEW_TOKENS,
+                    THINKING_BOOLEAN_MAX_NEW_TOKENS,
+            ),
             temperature=0.1,
             top_p=0.2,
     )[0]
@@ -366,7 +396,11 @@ def has_several_statements(problem: str, model: Qwen3) -> tuple[bool, str]:
     answer = model.sample(
             prompt,
             num_samples=1,
-            max_new_tokens=8,
+            max_new_tokens=max_tokens_for_model(
+                    model,
+                    BOOLEAN_MAX_NEW_TOKENS,
+                    THINKING_BOOLEAN_MAX_NEW_TOKENS,
+            ),
             temperature=0.1,
             top_p=0.2,
     )[0]
@@ -380,7 +414,12 @@ def split_into_several_problems(record: dict, model: Qwen3) -> list[dict]:
             problem=json_prompt_text(record['problem'].strip()),
             answer=json_prompt_text(record.get('answer')),
     )
-    parsed = sample_json_object(prompt, model, max_new_tokens=2048)
+    parsed = sample_json_object(
+            prompt,
+            model,
+            max_new_tokens=SPLIT_MAX_NEW_TOKENS,
+            thinking_max_new_tokens=THINKING_SPLIT_MAX_NEW_TOKENS,
+    )
     problems = parsed.get('problems')
     if not isinstance(problems, list) or not problems:
         raise ValueError(f'Expected nonempty problems list, got: {parsed!r}')
@@ -861,6 +900,7 @@ def load_cleaning_model(
         device: str | None,
         torch_dtype: str,
         quantization: str | None,
+        enable_thinking: bool,
 ) -> Qwen3:
     """Load the model used for data cleaning."""
     if device is not None:
@@ -878,7 +918,7 @@ def load_cleaning_model(
     qwen = Qwen3_8B(
             device=model_device,
             torch_dtype=torch_dtype,
-            enable_thinking=False,
+            enable_thinking=enable_thinking,
             quantization=quantization,
     )
     qwen.load()
@@ -924,9 +964,15 @@ def clean_rows(
         device: str | None = None,
         torch_dtype: str = 'auto',
         quantization: str | None = None,
+        enable_thinking: bool = False,
 ) -> None:
     """Run the data cleaning pipeline over the filtered dataset."""
-    qwen = load_cleaning_model(device, torch_dtype, quantization)
+    qwen = load_cleaning_model(
+            device,
+            torch_dtype,
+            quantization,
+            enable_thinking,
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ensure_append_starts_on_new_line(output_path)
@@ -1010,6 +1056,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device', choices=['cpu', 'mps', 'cuda'])
     parser.add_argument('--torch-dtype', default='auto')
     parser.add_argument('--quantization', choices=['4bit', '8bit'])
+    parser.add_argument('--enable-thinking', action='store_true')
     return parser.parse_args()
 
 
@@ -1022,4 +1069,5 @@ if __name__ == '__main__':
             device=args.device,
             torch_dtype=args.torch_dtype,
             quantization=args.quantization,
+            enable_thinking=args.enable_thinking,
     )
