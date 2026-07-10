@@ -64,23 +64,22 @@ class Qwen3:
 
     def sample(
         self,
-        prompt: str,
-        num_samples: int = 1,
+        prompts: list[str],
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.8,
     ) -> list[str]:
-        """Sample one or more completions from the loaded model."""
+        """Sample one completion for each prompt in one model call."""
         self._ensure_loaded()
         tokenizer = self.tokenizer
         model = self.model
         assert tokenizer is not None
         assert model is not None
 
-        if num_samples < 1:
-            raise ValueError('num_samples must be at least 1.')
+        if not prompts:
+            return []
 
-        encoded = self._encode_prompt(prompt, tokenizer)
+        encoded = self._encode_prompts(prompts, tokenizer)
         encoded = {
             name: tensor.to(self.device)
             for name, tensor in encoded.items()
@@ -90,7 +89,7 @@ class Qwen3:
             generated = model.generate(
                 **encoded,
                 max_new_tokens=max_new_tokens,
-                num_return_sequences=num_samples,
+                num_return_sequences=1,
                 do_sample=True,
                 temperature=temperature,
                 top_p=top_p,
@@ -103,18 +102,34 @@ class Qwen3:
             completion_ids,
             skip_special_tokens=True,
         )
-        return [self._clean_completion(completion) for completion in completions]
+        completions = [
+            self._clean_completion(completion)
+            for completion in completions
+        ]
+        return completions
 
-    def _encode_prompt(self, prompt: str, tokenizer: Any) -> dict[str, torch.Tensor]:
-        """Encode a user prompt with Qwen3's chat template."""
-        messages = [{'role': 'user', 'content': prompt}]
-        text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=self.enable_thinking,
-        )
-        return tokenizer([text], return_tensors='pt')
+    def _encode_prompts(
+        self,
+        prompts: list[str],
+        tokenizer: Any,
+    ) -> dict[str, torch.Tensor]:
+        """Encode user prompts with Qwen3's chat template."""
+        texts = []
+        for prompt in prompts:
+            messages = [{'role': 'user', 'content': prompt}]
+            texts.append(
+                tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=self.enable_thinking,
+                )
+            )
+
+        tokenizer.padding_side = 'left'
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer(texts, return_tensors='pt', padding=True)
 
     def _clean_completion(self, completion: str) -> str:
         """Remove Qwen3 thinking markup when present."""
