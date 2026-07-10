@@ -1,5 +1,6 @@
 import argparse
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -525,13 +526,6 @@ def exception_message(error: Exception) -> str:
     return f'{type(error).__name__}: {error}'
 
 
-def record_error(row_summary: dict, error: Exception) -> None:
-    """Attach exception details to the row summary."""
-    row_summary['error'] = exception_message(error)
-    if isinstance(error, InvalidJsonOutput):
-        row_summary['json_outputs']['invalid_json_output'] = error.output
-
-
 def raw_error_record(line: str, error: Exception) -> dict:
     """Return a failed row for an input line that could not be read."""
     return {
@@ -562,6 +556,39 @@ def source_id_is_cleaned(source_id: str, output_path: Path) -> bool:
                 return True
 
     return False
+
+
+@dataclass
+class CleanResult:
+    """Output rows and metadata produced while cleaning one source record."""
+
+    output_rows: list[dict] = field(default_factory=list)
+    boolean_outputs: dict = field(default_factory=dict)
+    json_outputs: dict = field(default_factory=dict)
+    error: str | None = None
+    missing_information: bool = False
+    errored: bool = False
+
+
+class Timers:
+    """Track total timings and timings for the current input row."""
+
+    def __init__(self):
+        self.total: dict[str, float] = {}
+        self.current_row: dict[str, float] = {}
+
+    def add(self, name: str, seconds: float) -> None:
+        """Add a timing sample to the total and current row timers."""
+        self.total[name] = self.total.get(name, 0.0) + seconds
+        self.current_row[name] = self.current_row.get(name, 0.0) + seconds
+
+    def timed(self, name: str, function: Any, *args: Any) -> Any:
+        """Call a function and record how long it takes."""
+        start = perf_counter()
+        try:
+            return function(*args)
+        finally:
+            self.add(name, perf_counter() - start)
 
 
 def add_proof_problem_rows(
@@ -598,6 +625,265 @@ def add_proof_problem_rows(
             ),
     )
     return rows
+
+
+def record_error(result: CleanResult, error: Exception) -> None:
+    """Attach exception details to a clean result."""
+    result.error = exception_message(error)
+    result.errored = True
+    if isinstance(error, InvalidJsonOutput):
+        result.json_outputs['invalid_json_output'] = error.output
+
+
+def proof_rows_for_problems(
+        record: dict,
+        problems: list[dict],
+        model: Qwen3,
+        prefix: str,
+        result: CleanResult,
+        timers: Timers,
+) -> None:
+    """Add proof-problem rows derived from standalone problems."""
+    for problem_ix, split_problem in enumerate(problems):
+        proof_rows = timers.timed(
+                'add_proof_problem_rows',
+                add_proof_problem_rows,
+                record,
+                split_problem['problem'],
+                split_problem.get('answer'),
+                model,
+                f'{prefix}_{problem_ix}',
+        )
+        result.json_outputs.setdefault('add_proof_problem_rows', []).extend(
+                proof_rows
+        )
+        result.output_rows.extend(proof_rows)
+
+
+def clean_math_word_problem(
+        record: dict,
+        model: Qwen3,
+        result: CleanResult,
+        timers: Timers,
+) -> None:
+    """Clean a math-word-problem row into proof-problem rows."""
+    is_multi_part, is_multi_part_answer = timers.timed(
+            'is_multi_part_problem',
+            is_multi_part_problem,
+            record['problem'],
+            model,
+    )
+    result.boolean_outputs['is_multi_part_problem'] = is_multi_part
+    result.boolean_outputs['is_multi_part_problem_answer'] = is_multi_part_answer
+
+    if is_multi_part:
+        problems = timers.timed(
+                'split_into_several_problems',
+                split_into_several_problems,
+                record,
+                model,
+        )
+        result.json_outputs['split_into_several_problems'] = problems
+    else:
+        problems = [
+                {
+                        'problem': record['problem'],
+                        'answer': record.get('answer'),
+                }
+        ]
+
+    proof_rows_for_problems(
+            record,
+            problems,
+            model,
+            'part',
+            result,
+            timers,
+    )
+
+
+def clean_mcq(
+        record: dict,
+        model: Qwen3,
+        result: CleanResult,
+        timers: Timers,
+) -> None:
+    """Clean an MCQ row into proof-problem rows."""
+    several_statements, several_statements_answer = timers.timed(
+            'has_several_statements',
+            has_several_statements,
+            record['problem'],
+            model,
+    )
+    result.boolean_outputs['has_several_statements'] = several_statements
+    result.boolean_outputs['has_several_statements_answer'] = (
+            several_statements_answer
+    )
+
+    if several_statements:
+        problems = timers.timed(
+                'split_into_several_problems',
+                split_into_several_problems,
+                record,
+                model,
+        )
+        result.json_outputs['split_into_several_problems'] = problems
+    else:
+        removed_options = timers.timed(
+                'remove_options',
+                remove_options,
+                record,
+                model,
+        )
+        result.json_outputs['remove_options'] = removed_options
+        problems = [removed_options]
+
+    proof_rows_for_problems(
+            record,
+            problems,
+            model,
+            'mcq',
+            result,
+            timers,
+    )
+
+
+def clean_supported_record(
+        record: dict,
+        model: Qwen3,
+        result: CleanResult,
+        timers: Timers,
+) -> None:
+    """Clean a record after missing-information checks have passed."""
+    question_type = record.get('question_type')
+
+    if question_type == 'proof':
+        result.output_rows.append(formalization_record(record))
+        return
+
+    if question_type == 'math-word-problem':
+        clean_math_word_problem(record, model, result, timers)
+        return
+
+    if question_type == 'MCQ':
+        clean_mcq(record, model, result, timers)
+        return
+
+    result.output_rows.append(failed_record(record, 'unsupported_type'))
+
+
+def clean_record(record: dict, model: Qwen3, timers: Timers) -> CleanResult:
+    """Clean one input record and return output rows plus metadata."""
+    result = CleanResult()
+
+    try:
+        missing_information, missing_information_answer = timers.timed(
+                'has_missing_information',
+                has_missing_information,
+                record['problem'],
+                model,
+        )
+        result.boolean_outputs['has_missing_information'] = missing_information
+        result.boolean_outputs['has_missing_information_answer'] = (
+                missing_information_answer
+        )
+    except Exception as error:
+        record_error(result, error)
+        result.output_rows.append(failed_record(record, 'error'))
+        return result
+
+    if missing_information:
+        result.missing_information = True
+        result.output_rows.append(failed_record(record, 'missing_information'))
+        return result
+
+    try:
+        clean_supported_record(record, model, result, timers)
+    except Exception as error:
+        record_error(result, error)
+        result.output_rows.append(failed_record(record, 'error'))
+
+    return result
+
+
+def row_summary(record: dict, result: CleanResult, row_timings: dict) -> dict:
+    """Return the summary object for one cleaned input record."""
+    return {
+            'id': record.get('id'),
+            'question_type': record.get('question_type'),
+            'problem': record.get('problem'),
+            'answer': record.get('answer'),
+            'boolean_outputs': dict(result.boolean_outputs),
+            'json_outputs': dict(result.json_outputs),
+            'error': result.error,
+            'timings': dict(row_timings),
+    }
+
+
+def raw_row_summary(line: str, error: Exception, row_timings: dict) -> dict:
+    """Return the summary object for an unreadable input row."""
+    return {
+            'id': None,
+            'question_type': None,
+            'problem': None,
+            'answer': None,
+            'raw_input': line,
+            'boolean_outputs': {},
+            'json_outputs': {},
+            'error': exception_message(error),
+            'timings': dict(row_timings),
+    }
+
+
+def write_cleaned_rows(
+        output_file: Any,
+        rows: list[dict],
+        result: CleanResult,
+        row_timings: dict[str, float],
+) -> None:
+    """Write cleaned rows with their data-cleaning metadata."""
+    for output_row in rows:
+        write_record(
+                output_file,
+                cleaned_record_with_metadata(
+                        output_row,
+                        result.boolean_outputs,
+                        result.json_outputs,
+                        row_timings,
+                        result.error,
+                ),
+        )
+    if rows:
+        output_file.flush()
+
+
+def load_cleaning_model(
+        device: str | None,
+        torch_dtype: str,
+        quantization: str | None,
+) -> Qwen3:
+    """Load the model used for data cleaning."""
+    if device is not None:
+        model_device = torch.device(device)
+    elif torch.cuda.is_available():
+        model_device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        model_device = torch.device('mps')
+    else:
+        model_device = torch.device('cpu')
+
+    if torch_dtype == 'auto' and model_device.type == 'mps':
+        torch_dtype = 'float16'
+
+    qwen = Qwen3_8B(
+            device=model_device,
+            torch_dtype=torch_dtype,
+            enable_thinking=False,
+            quantization=quantization,
+    )
+    qwen.load()
+    print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
+    return qwen
 
 
 def data_cleaning_summary(
@@ -640,25 +926,7 @@ def clean_rows(
         quantization: str | None = None,
 ) -> None:
     """Run the data cleaning pipeline over the filtered dataset."""
-    if device is not None:
-        model_device = torch.device(device)
-    elif torch.cuda.is_available():
-        model_device = torch.device('cuda')
-    elif torch.backends.mps.is_available():
-        model_device = torch.device('mps')
-    else:
-        model_device = torch.device('cpu')
-
-    if torch_dtype == 'auto' and model_device is not None and model_device.type == 'mps':
-        torch_dtype = 'float16'
-    qwen = Qwen3_8B(
-            device=model_device,
-            torch_dtype=torch_dtype,
-            enable_thinking=False,
-            quantization=quantization,
-    )
-    qwen.load()
-    print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
+    qwen = load_cleaning_model(device, torch_dtype, quantization)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ensure_append_starts_on_new_line(output_path)
@@ -668,23 +936,8 @@ def clean_rows(
     errored_rows = 0
     output_rows = []
     row_summaries = []
-    timers: dict[str, float] = {}
+    timers = Timers()
     cleaned_rows = 0
-    current_row_timings: dict[str, float] | None = None
-
-    def add_timer(name: str, seconds: float) -> None:
-        timers[name] = timers.get(name, 0.0) + seconds
-        if current_row_timings is not None:
-            current_row_timings[name] = (
-                    current_row_timings.get(name, 0.0) + seconds
-            )
-
-    def timed(name: str, function: Any, *args: Any) -> Any:
-        start = perf_counter()
-        try:
-            return function(*args)
-        finally:
-            add_timer(name, perf_counter() - start)
 
     with input_path.open(encoding='utf-8') as input_file:
         with output_path.open('a', encoding='utf-8') as output_file:
@@ -695,6 +948,7 @@ def clean_rows(
                 if cleaned_rows >= rows_to_clean:
                     break
 
+                timers.current_row = {}
                 row_start = perf_counter()
                 try:
                     record = json.loads(line)
@@ -702,223 +956,37 @@ def clean_rows(
                         continue
                 except Exception as error:
                     row_timings = {'row_iteration': perf_counter() - row_start}
-                    row_summary = {
-                            'id': None,
-                            'question_type': None,
-                            'problem': None,
-                            'answer': None,
-                            'raw_input': line,
-                            'boolean_outputs': {},
-                            'json_outputs': {},
-                            'error': exception_message(error),
-                            'timings': row_timings,
-                    }
                     output_row = raw_error_record(line, error)
                     output_rows.append(output_row)
-                    row_summaries.append(row_summary)
+                    row_summaries.append(raw_row_summary(line, error, row_timings))
                     write_record(output_file, output_row)
                     output_file.flush()
                     rows_read += 1
                     errored_rows += 1
                     cleaned_rows += 1
-                    add_timer('row_iteration', row_timings['row_iteration'])
+                    timers.add('row_iteration', row_timings['row_iteration'])
                     continue
 
                 rows_read += 1
-                output_start = len(output_rows)
-                row_summary = {
-                        'id': record.get('id'),
-                        'question_type': record.get('question_type'),
-                        'problem': record.get('problem'),
-                        'answer': record.get('answer'),
-                        'boolean_outputs': {},
-                        'json_outputs': {},
-                        'error': None,
-                        'timings': {},
-                }
-                boolean_outputs = row_summary['boolean_outputs']
-                json_outputs = row_summary['json_outputs']
-                row_timings = row_summary['timings']
-                current_row_timings = row_timings
+                result = clean_record(record, qwen, timers)
+                timers.add('row_iteration', perf_counter() - row_start)
 
-                try:
-                    missing_information, missing_information_answer = timed(
-                            'has_missing_information',
-                            has_missing_information,
-                            record['problem'],
-                            qwen,
-                    )
-                    boolean_outputs['has_missing_information'] = missing_information
-                    boolean_outputs['has_missing_information_answer'] = (
-                            missing_information_answer
-                    )
-                except Exception as error:
-                    record_error(row_summary, error)
-                    output_rows.append(failed_record(record, 'error'))
-                    errored_rows += 1
-                    add_timer('row_iteration', perf_counter() - row_start)
-                    row_summaries.append(row_summary)
-                    new_output_rows = output_rows[output_start:]
-                    for output_row in new_output_rows:
-                        write_record(
-                                output_file,
-                                cleaned_record_with_metadata(
-                                        output_row,
-                                        boolean_outputs,
-                                        json_outputs,
-                                        row_timings,
-                                        row_summary['error'],
-                                ),
-                        )
-                    output_file.flush()
-                    cleaned_rows += 1
-                    current_row_timings = None
-                    continue
-
-                if missing_information:
-                    output_rows.append(failed_record(record, 'missing_information'))
+                output_rows.extend(result.output_rows)
+                row_summaries.append(
+                        row_summary(record, result, timers.current_row)
+                )
+                write_cleaned_rows(
+                        output_file,
+                        result.output_rows,
+                        result,
+                        timers.current_row,
+                )
+                if result.missing_information:
                     missing_information_rows += 1
-                    add_timer('row_iteration', perf_counter() - row_start)
-                    row_summaries.append(row_summary)
-                    new_output_rows = output_rows[output_start:]
-                    for output_row in new_output_rows:
-                        write_record(
-                                output_file,
-                                cleaned_record_with_metadata(
-                                        output_row,
-                                        boolean_outputs,
-                                        json_outputs,
-                                        row_timings,
-                                        row_summary['error'],
-                                ),
-                        )
-                    output_file.flush()
-                    cleaned_rows += 1
-                    current_row_timings = None
-                    continue
-
-                try:
-                    question_type = record.get('question_type')
-
-                    if question_type == 'proof':
-                        output_rows.append(formalization_record(record))
-                        continue
-
-                    if question_type == 'math-word-problem':
-                        is_multi_part, is_multi_part_answer = timed(
-                                'is_multi_part_problem',
-                                is_multi_part_problem,
-                                record['problem'],
-                                qwen,
-                        )
-                        boolean_outputs['is_multi_part_problem'] = is_multi_part
-                        boolean_outputs['is_multi_part_problem_answer'] = (
-                                is_multi_part_answer
-                        )
-                        if is_multi_part:
-                            problems = timed(
-                                    'split_into_several_problems',
-                                    split_into_several_problems,
-                                    record,
-                                    qwen,
-                            )
-                            json_outputs['split_into_several_problems'] = problems
-                        else:
-                            problems = [
-                                    {
-                                            'problem': record['problem'],
-                                            'answer': record.get('answer'),
-                                    }
-                            ]
-
-                        for problem_ix, split_problem in enumerate(problems):
-                            proof_rows = timed(
-                                    'add_proof_problem_rows',
-                                    add_proof_problem_rows,
-                                    record,
-                                    split_problem['problem'],
-                                    split_problem.get('answer'),
-                                    qwen,
-                                    f'part_{problem_ix}',
-                            )
-                            json_outputs.setdefault(
-                                    'add_proof_problem_rows',
-                                    [],
-                            ).extend(proof_rows)
-                            output_rows.extend(proof_rows)
-                        continue
-
-                    if question_type == 'MCQ':
-                        several_statements, several_statements_answer = timed(
-                                'has_several_statements',
-                                has_several_statements,
-                                record['problem'],
-                                qwen,
-                        )
-                        boolean_outputs['has_several_statements'] = several_statements
-                        boolean_outputs['has_several_statements_answer'] = (
-                                several_statements_answer
-                        )
-                        if several_statements:
-                            problems = timed(
-                                    'split_into_several_problems',
-                                    split_into_several_problems,
-                                    record,
-                                    qwen,
-                            )
-                            json_outputs['split_into_several_problems'] = problems
-                        else:
-                            removed_options = timed(
-                                    'remove_options',
-                                    remove_options,
-                                    record,
-                                    qwen,
-                            )
-                            json_outputs['remove_options'] = removed_options
-                            problems = [removed_options]
-
-                        for problem_ix, split_problem in enumerate(problems):
-                            proof_rows = timed(
-                                    'add_proof_problem_rows',
-                                    add_proof_problem_rows,
-                                    record,
-                                    split_problem['problem'],
-                                    split_problem.get('answer'),
-                                    qwen,
-                                    f'mcq_{problem_ix}',
-                            )
-                            json_outputs.setdefault(
-                                    'add_proof_problem_rows',
-                                    [],
-                            ).extend(proof_rows)
-                            output_rows.extend(proof_rows)
-                        continue
-
-                    output_rows.append(failed_record(record, 'unsupported_type'))
-                except Exception as error:
-                    record_error(row_summary, error)
-                    output_rows.append(failed_record(record, 'error'))
+                if result.errored:
                     errored_rows += 1
-                    continue
-                finally:
-                    add_timer('row_iteration', perf_counter() - row_start)
-                    row_summaries.append(row_summary)
-                    new_output_rows = output_rows[output_start:]
-                    for output_row in new_output_rows:
-                        write_record(
-                                output_file,
-                                cleaned_record_with_metadata(
-                                        output_row,
-                                        boolean_outputs,
-                                        json_outputs,
-                                        row_timings,
-                                        row_summary['error'],
-                                ),
-                        )
-                    if new_output_rows:
-                        output_file.flush()
-                        cleaned_rows += 1
-                    current_row_timings = None
+                if result.output_rows:
+                    cleaned_rows += 1
 
     if print_summary:
         print(
@@ -928,7 +996,7 @@ def clean_rows(
                         errored_rows,
                         output_rows,
                         row_summaries,
-                        timers,
+                        timers.total,
                 )
         )
 
