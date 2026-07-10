@@ -2,8 +2,10 @@ import json
 import random
 from pathlib import Path
 
+from alphaproof.core.paths import PROJECT_ROOT
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / 'data'
+
+DATA_DIR = PROJECT_ROOT / 'data'
 DATASET_DIR = DATA_DIR / 'dataset'
 NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5.jsonl'
 FILTERED_NUMINA_MATH_1_5_PATH = DATASET_DIR / 'numina_math_1_5_filtered.jsonl'

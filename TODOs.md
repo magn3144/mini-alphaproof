@@ -1,4 +1,4 @@
-- [ ] Fix errors in data cleaning script.
+- [X] Fix errors in data cleaning script.
 - [X] Test data cleaning script with timer and LLM otputs printed to see why it takes so long to execute.
-- [ ] Organize code in data_cleaning.py
+- [X] Organize code in data_cleaning.py
 - [ ] Add JSON schema to model in data cleaning pipeline.
