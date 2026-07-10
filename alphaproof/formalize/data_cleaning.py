@@ -565,6 +565,30 @@ def exception_message(error: Exception) -> str:
     return f'{type(error).__name__}: {error}'
 
 
+def is_out_of_memory_error(error: Exception) -> bool:
+    """Return whether an exception looks like a torch accelerator OOM."""
+    if isinstance(error, torch.cuda.OutOfMemoryError):
+        return True
+
+    message = str(error).lower()
+    return (
+            'out of memory' in message
+            or 'failed to allocate' in message
+    )
+
+
+def clear_accelerator_cache() -> None:
+    """Release cached accelerator memory after a failed generation."""
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
 def raw_error_record(line: str, error: Exception) -> dict:
     """Return a failed row for an input line that could not be read."""
     return {
@@ -828,6 +852,8 @@ def clean_record(record: dict, model: Qwen3, timers: Timers) -> CleanResult:
         )
     except Exception as error:
         record_error(result, error)
+        if is_out_of_memory_error(error):
+            clear_accelerator_cache()
         result.output_rows.append(failed_record(record, 'error'))
         return result
 
@@ -840,6 +866,8 @@ def clean_record(record: dict, model: Qwen3, timers: Timers) -> CleanResult:
         clean_supported_record(record, model, result, timers)
     except Exception as error:
         record_error(result, error)
+        if is_out_of_memory_error(error):
+            clear_accelerator_cache()
         result.output_rows.append(failed_record(record, 'error'))
 
     return result
