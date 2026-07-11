@@ -370,9 +370,13 @@ def clean_records(
         model: Qwen3,
         timers: Timers,
 ) -> list[CleanResult]:
-    """Clean input records using one model call per stage."""
+    """Clean a same-question-type batch using one model call per stage."""
     results = [CleanResult() for _ in records]
+    if not records:
+        return results
+
     indexed_records = list(enumerate(records))
+    question_type = records[0].get('question_type')
 
     try:
         missing_outputs = timers.timed(
@@ -385,8 +389,7 @@ def clean_records(
         fail_indexed_records(indexed_records, results, error)
         return results
 
-    math_records = []
-    mcq_records = []
+    non_missing_records = []
     for (record_ix, record), (missing_information, answer) in zip(
             indexed_records,
             missing_outputs,
@@ -398,18 +401,20 @@ def clean_records(
         if missing_information:
             result.missing_information = True
             result.output_rows.append(failed_record(record, 'missing_information'))
-            continue
-
-        question_type = record.get('question_type')
-        if question_type == 'proof':
-            result.output_rows.append(formalization_record(record))
-        elif question_type == 'math-word-problem':
-            math_records.append((record_ix, record))
-        elif question_type == 'MCQ':
-            mcq_records.append((record_ix, record))
         else:
-            result.output_rows.append(failed_record(record, 'unsupported_type'))
+            non_missing_records.append((record_ix, record))
 
-    clean_math_word_problems(math_records, model, results, timers)
-    clean_mcqs(mcq_records, model, results, timers)
+    if question_type == 'proof':
+        for record_ix, record in non_missing_records:
+            results[record_ix].output_rows.append(formalization_record(record))
+    elif question_type == 'math-word-problem':
+        clean_math_word_problems(non_missing_records, model, results, timers)
+    elif question_type == 'MCQ':
+        clean_mcqs(non_missing_records, model, results, timers)
+    else:
+        for record_ix, record in non_missing_records:
+            results[record_ix].output_rows.append(
+                    failed_record(record, 'unsupported_type')
+            )
+
     return results
