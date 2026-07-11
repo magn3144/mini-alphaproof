@@ -2,12 +2,18 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import transformers.tokenization_utils as transformers_tokenization_utils
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
+if not hasattr(transformers_tokenization_utils, "PreTrainedTokenizerBase"):
+    transformers_tokenization_utils.PreTrainedTokenizerBase = PreTrainedTokenizerBase
+
 from lmformatenforcer import JsonSchemaParser
 from lmformatenforcer.integrations.transformers import (
     build_transformers_prefix_allowed_tokens_fn,
 )
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from alphaproof.core.config import MODELS_DIR
 
