@@ -218,7 +218,6 @@ def clean_rows(
         device: str | None = None,
         torch_dtype: str = 'auto',
         quantization: str | None = None,
-        enable_thinking: bool = False,
 ) -> None:
     """Run the data cleaning pipeline over the filtered dataset."""
     if batch_size < 1:
@@ -228,7 +227,6 @@ def clean_rows(
             device,
             torch_dtype,
             quantization,
-            enable_thinking,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,7 +274,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device', choices=['cpu', 'mps', 'cuda'])
     parser.add_argument('--torch-dtype', default='auto')
     parser.add_argument('--quantization', choices=['4bit', '8bit'])
-    parser.add_argument('--enable-thinking', action='store_true')
     return parser.parse_args()
 
 
@@ -290,5 +287,4 @@ if __name__ == '__main__':
             device=args.device,
             torch_dtype=args.torch_dtype,
             quantization=args.quantization,
-            enable_thinking=args.enable_thinking,
     )

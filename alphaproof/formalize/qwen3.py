@@ -1,6 +1,10 @@
 from pathlib import Path
 from typing import Any
 
+from lmformatenforcer import JsonSchemaParser
+from lmformatenforcer.integrations.transformers import (
+    build_transformers_prefix_allowed_tokens_fn,
+)
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -24,7 +28,6 @@ class Qwen3:
         device: str | torch.device | None = None,
         torch_dtype: torch.dtype | str = 'auto',
         trust_remote_code: bool = True,
-        enable_thinking: bool = False,
         quantization: str | None = None,
     ):
         """Store model settings without loading weights until load() is called."""
@@ -36,7 +39,6 @@ class Qwen3:
         )
         self.torch_dtype = torch_dtype
         self.trust_remote_code = trust_remote_code
-        self.enable_thinking = enable_thinking
         self.quantization = quantization
         self.tokenizer: Any | None = None
         self.model: Any | None = None
@@ -68,6 +70,7 @@ class Qwen3:
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.8,
+        json_schema: dict[str, Any] | None = None,
     ) -> list[str]:
         """Sample one completion for each prompt in one model call."""
         self._ensure_loaded()
@@ -84,6 +87,7 @@ class Qwen3:
             name: tensor.to(self.device)
             for name, tensor in encoded.items()
         }
+        generate_kwargs = self._generate_kwargs(tokenizer, json_schema)
 
         with torch.no_grad():
             generated = model.generate(
@@ -94,6 +98,7 @@ class Qwen3:
                 temperature=temperature,
                 top_p=top_p,
                 pad_token_id=self._pad_token_id(tokenizer),
+                **generate_kwargs,
             )
 
         prompt_length = encoded['input_ids'].shape[-1]
@@ -122,7 +127,7 @@ class Qwen3:
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
-                    enable_thinking=self.enable_thinking,
+                    enable_thinking=False,
                 )
             )
 
@@ -131,16 +136,25 @@ class Qwen3:
             tokenizer.pad_token = tokenizer.eos_token
         return tokenizer(texts, return_tensors='pt', padding=True)
 
-    def _clean_completion(self, completion: str) -> str:
-        """Remove Qwen3 thinking markup when present."""
-        end_tag = '</think>'
-        if '<think>' in completion and end_tag not in completion:
-            raise RuntimeError(
-                'Model thinking did not finish before max_new_tokens. '
-                'Increase max_new_tokens for this sample.'
+    def _generate_kwargs(
+        self,
+        tokenizer: Any,
+        json_schema: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Return extra generate() kwargs for optional structured output."""
+        if json_schema is None:
+            return {}
+
+        parser = JsonSchemaParser(json_schema)
+        return {
+            'prefix_allowed_tokens_fn': build_transformers_prefix_allowed_tokens_fn(
+                tokenizer,
+                parser,
             )
-        if end_tag in completion:
-            completion = completion.split(end_tag, maxsplit=1)[1]
+        }
+
+    def _clean_completion(self, completion: str) -> str:
+        """Clean model output text."""
         return completion.strip()
 
     def _ensure_loaded(self) -> None:
@@ -201,7 +215,6 @@ class Qwen3_8B(Qwen3):
         device: str | torch.device | None = None,
         torch_dtype: torch.dtype | str = 'auto',
         trust_remote_code: bool = True,
-        enable_thinking: bool = False,
         quantization: str | None = None,
     ):
         """Store Qwen3-8B settings without loading weights until load()."""
@@ -210,6 +223,5 @@ class Qwen3_8B(Qwen3):
             device=device,
             torch_dtype=torch_dtype,
             trust_remote_code=trust_remote_code,
-            enable_thinking=enable_thinking,
             quantization=quantization,
         )

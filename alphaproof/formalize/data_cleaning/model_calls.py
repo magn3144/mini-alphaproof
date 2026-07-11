@@ -13,15 +13,20 @@ from alphaproof.formalize.data_cleaning.prompts import (
         REMOVE_OPTIONS_PROMPT,
         SEVERAL_STATEMENTS_PROMPT,
 )
+from alphaproof.formalize.data_cleaning.schemas import (
+        ANSWER_PROOF_SCHEMA,
+        ANSWERLESS_PROOF_SCHEMA,
+        MATH_WORD_SPLIT_PROBLEM_SCHEMA,
+        MCQ_SPLIT_PROBLEM_SCHEMA,
+        PROOF_SPLIT_PROBLEM_SCHEMA,
+        REMOVE_OPTIONS_SCHEMA,
+)
 from alphaproof.formalize.qwen3 import Qwen3
 
 
 BOOLEAN_MAX_NEW_TOKENS = 8
 JSON_MAX_NEW_TOKENS = 1024
 SPLIT_MAX_NEW_TOKENS = 2048
-THINKING_BOOLEAN_MAX_NEW_TOKENS = 4096
-THINKING_JSON_MAX_NEW_TOKENS = 16384
-THINKING_SPLIT_MAX_NEW_TOKENS = 32768
 
 
 def fill_prompt(template: str, **values: str) -> str:
@@ -69,33 +74,19 @@ def parse_json_object(answer: str) -> dict[str, Any]:
         raise InvalidJsonOutput(answer, error) from error
 
 
-def max_tokens_for_model(
-        model: Qwen3,
-        max_new_tokens: int,
-        thinking_max_new_tokens: int,
-) -> int:
-    """Return a larger generation budget when thinking is enabled."""
-    if getattr(model, 'enable_thinking', False):
-        return thinking_max_new_tokens
-    return max_new_tokens
-
-
 def sample_json_objects(
         prompts: list[str],
         model: Qwen3,
+        json_schema: dict[str, Any],
         max_new_tokens: int = JSON_MAX_NEW_TOKENS,
-        thinking_max_new_tokens: int = THINKING_JSON_MAX_NEW_TOKENS,
 ) -> list[dict[str, Any]]:
     """Sample and parse one JSON object for each prompt."""
     answers = model.sample(
             prompts,
-            max_new_tokens=max_tokens_for_model(
-                    model,
-                    max_new_tokens,
-                    thinking_max_new_tokens,
-            ),
+            max_new_tokens=max_new_tokens,
             temperature=0.1,
             top_p=0.2,
+            json_schema=json_schema,
     )
     return [parse_json_object(answer) for answer in answers]
 
@@ -107,11 +98,7 @@ def sample_yes_no(
     """Sample and parse one YES/NO answer for each prompt."""
     answers = model.sample(
             prompts,
-            max_new_tokens=max_tokens_for_model(
-                    model,
-                    BOOLEAN_MAX_NEW_TOKENS,
-                    THINKING_BOOLEAN_MAX_NEW_TOKENS,
-            ),
+            max_new_tokens=BOOLEAN_MAX_NEW_TOKENS,
             temperature=0.1,
             top_p=0.2,
     )
@@ -200,6 +187,7 @@ def sample_split_problem_outputs(
         prompt_template: str,
         records: list[dict],
         model: Qwen3,
+        json_schema: dict[str, Any],
 ) -> list[list[dict]]:
     """Sample split-problem JSON outputs with the given prompt."""
     prompts = [
@@ -213,8 +201,8 @@ def sample_split_problem_outputs(
     parsed_outputs = sample_json_objects(
             prompts,
             model,
+            json_schema,
             max_new_tokens=SPLIT_MAX_NEW_TOKENS,
-            thinking_max_new_tokens=THINKING_SPLIT_MAX_NEW_TOKENS,
     )
     return [parse_split_problems(parsed) for parsed in parsed_outputs]
 
@@ -228,6 +216,7 @@ def split_math_word_problems(
             MATH_WORD_SPLIT_PROBLEM_PROMPT,
             records,
             model,
+            MATH_WORD_SPLIT_PROBLEM_SCHEMA,
     )
 
 
@@ -236,7 +225,12 @@ def split_mcq_statements(
         model: Qwen3,
 ) -> list[list[dict]]:
     """Split each statement-option MCQ into true/false problems."""
-    return sample_split_problem_outputs(MCQ_SPLIT_PROBLEM_PROMPT, records, model)
+    return sample_split_problem_outputs(
+            MCQ_SPLIT_PROBLEM_PROMPT,
+            records,
+            model,
+            MCQ_SPLIT_PROBLEM_SCHEMA,
+    )
 
 
 def split_proof_questions(
@@ -254,8 +248,8 @@ def split_proof_questions(
     parsed_outputs = sample_json_objects(
             prompts,
             model,
+            PROOF_SPLIT_PROBLEM_SCHEMA,
             max_new_tokens=SPLIT_MAX_NEW_TOKENS,
-            thinking_max_new_tokens=THINKING_SPLIT_MAX_NEW_TOKENS,
     )
     return [
             parse_split_problems(parsed, include_answer=False)
@@ -289,7 +283,7 @@ def remove_options(
     ]
     return [
             parse_removed_options(parsed)
-            for parsed in sample_json_objects(prompts, model)
+            for parsed in sample_json_objects(prompts, model, REMOVE_OPTIONS_SCHEMA)
     ]
 
 
@@ -306,7 +300,9 @@ def proof_problems_with_answer(
             )
             for job in jobs
     ]
-    return parse_proof_problems(sample_json_objects(prompts, model))
+    return parse_proof_problems(
+            sample_json_objects(prompts, model, ANSWER_PROOF_SCHEMA)
+    )
 
 
 def proof_problems_without_answer(
@@ -321,7 +317,9 @@ def proof_problems_without_answer(
             )
             for job in jobs
     ]
-    return parse_proof_problems(sample_json_objects(prompts, model))
+    return parse_proof_problems(
+            sample_json_objects(prompts, model, ANSWERLESS_PROOF_SCHEMA)
+    )
 
 
 def parse_proof_problems(parsed_outputs: list[dict[str, Any]]) -> list[str]:

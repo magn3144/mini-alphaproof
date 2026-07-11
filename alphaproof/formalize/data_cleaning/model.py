@@ -31,7 +31,6 @@ def load_cleaning_model(
         device: str | None,
         torch_dtype: str,
         quantization: str | None,
-        enable_thinking: bool,
 ) -> Qwen3:
     """Load the model used for data cleaning."""
     if device is not None:
@@ -49,7 +48,6 @@ def load_cleaning_model(
     qwen = Qwen3_8B(
             device=model_device,
             torch_dtype=torch_dtype,
-            enable_thinking=enable_thinking,
             quantization=quantization,
     )
     qwen.load()
