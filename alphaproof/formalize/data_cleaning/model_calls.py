@@ -4,11 +4,14 @@ from typing import Any
 from alphaproof.formalize.data_cleaning.prompts import (
         ANSWER_PROOF_PROMPT,
         ANSWERLESS_PROOF_PROMPT,
+        MATH_WORD_MULTI_PART_PROMPT,
+        MATH_WORD_SPLIT_PROBLEM_PROMPT,
         MISSING_INFORMATION_PROMPT,
-        MULTI_PART_PROMPT,
+        MCQ_SPLIT_PROBLEM_PROMPT,
+        PROOF_SEVERAL_QUESTIONS_PROMPT,
+        PROOF_SPLIT_PROBLEM_PROMPT,
         REMOVE_OPTIONS_PROMPT,
         SEVERAL_STATEMENTS_PROMPT,
-        SPLIT_PROBLEM_PROMPT,
 )
 from alphaproof.formalize.qwen3 import Qwen3
 
@@ -133,7 +136,25 @@ def is_multi_part_problem(
 ) -> list[tuple[bool, str]]:
     """Return whether each problem should be split and the raw answer."""
     prompts = [
-            fill_prompt(MULTI_PART_PROMPT, problem=record['problem'].strip())
+            fill_prompt(
+                    MATH_WORD_MULTI_PART_PROMPT,
+                    problem=record['problem'].strip(),
+            )
+            for record in records
+    ]
+    return sample_yes_no(prompts, model)
+
+
+def has_several_proof_questions(
+        records: list[dict],
+        model: Qwen3,
+) -> list[tuple[bool, str]]:
+    """Return whether each proof problem should be split and the raw answer."""
+    prompts = [
+            fill_prompt(
+                    PROOF_SEVERAL_QUESTIONS_PROMPT,
+                    problem=record['problem'].strip(),
+            )
             for record in records
     ]
     return sample_yes_no(prompts, model)
@@ -151,8 +172,11 @@ def has_several_statements(
     return sample_yes_no(prompts, model)
 
 
-def parse_split_problems(parsed: dict[str, Any]) -> list[dict]:
-    """Parse split-problem JSON into standalone problem/answer pairs."""
+def parse_split_problems(
+        parsed: dict[str, Any],
+        include_answer: bool = True,
+) -> list[dict]:
+    """Parse split-problem JSON into standalone problem objects."""
     problems = parsed.get('problems')
     if not isinstance(problems, list) or not problems:
         raise ValueError(f'Expected nonempty problems list, got: {parsed!r}')
@@ -164,24 +188,23 @@ def parse_split_problems(parsed: dict[str, Any]) -> list[dict]:
         text = problem.get('problem')
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f'Expected problem text, got: {problem!r}')
-        split_problems.append(
-                {
-                        'problem': text.strip(),
-                        'answer': problem.get('answer'),
-                }
-        )
+        split_problem = {'problem': text.strip(), 'answer': None}
+        if include_answer:
+            split_problem['answer'] = problem.get('answer')
+        split_problems.append(split_problem)
 
     return split_problems
 
 
-def split_into_several_problems(
+def sample_split_problem_outputs(
+        prompt_template: str,
         records: list[dict],
         model: Qwen3,
 ) -> list[list[dict]]:
-    """Split each record into standalone problem/answer pairs."""
+    """Sample split-problem JSON outputs with the given prompt."""
     prompts = [
             fill_prompt(
-                    SPLIT_PROBLEM_PROMPT,
+                    prompt_template,
                     problem=json_prompt_text(record['problem'].strip()),
                     answer=json_prompt_text(record.get('answer')),
             )
@@ -194,6 +217,50 @@ def split_into_several_problems(
             thinking_max_new_tokens=THINKING_SPLIT_MAX_NEW_TOKENS,
     )
     return [parse_split_problems(parsed) for parsed in parsed_outputs]
+
+
+def split_math_word_problems(
+        records: list[dict],
+        model: Qwen3,
+) -> list[list[dict]]:
+    """Split each math word problem into standalone problem/answer pairs."""
+    return sample_split_problem_outputs(
+            MATH_WORD_SPLIT_PROBLEM_PROMPT,
+            records,
+            model,
+    )
+
+
+def split_mcq_statements(
+        records: list[dict],
+        model: Qwen3,
+) -> list[list[dict]]:
+    """Split each statement-option MCQ into true/false problems."""
+    return sample_split_problem_outputs(MCQ_SPLIT_PROBLEM_PROMPT, records, model)
+
+
+def split_proof_questions(
+        records: list[dict],
+        model: Qwen3,
+) -> list[list[dict]]:
+    """Split each proof problem into standalone proof problems."""
+    prompts = [
+            fill_prompt(
+                    PROOF_SPLIT_PROBLEM_PROMPT,
+                    problem=json_prompt_text(record['problem'].strip()),
+            )
+            for record in records
+    ]
+    parsed_outputs = sample_json_objects(
+            prompts,
+            model,
+            max_new_tokens=SPLIT_MAX_NEW_TOKENS,
+            thinking_max_new_tokens=THINKING_SPLIT_MAX_NEW_TOKENS,
+    )
+    return [
+            parse_split_problems(parsed, include_answer=False)
+            for parsed in parsed_outputs
+    ]
 
 
 def parse_removed_options(parsed: dict[str, Any]) -> dict:

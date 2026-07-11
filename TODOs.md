@@ -1,6 +1,6 @@
 - [X] Fix errors in data cleaning script.
 - [X] Test data cleaning script with timer and LLM otputs printed to see why it takes so long to execute.
 - [X] Organize code in data_cleaning.py
-- [ ] Understand how data cleaning script batches problems of the same type.
-- [ ] Add splitter for proof questions.
+- [X] Understand how data cleaning script batches problems of the same type.
+- [X] Add splitter for proof questions.
 - [ ] Add JSON schema to model in data cleaning pipeline.

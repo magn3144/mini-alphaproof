@@ -9,12 +9,15 @@ from alphaproof.formalize.data_cleaning.model import (
 from alphaproof.formalize.data_cleaning.model_calls import (
         InvalidJsonOutput,
         has_missing_information,
+        has_several_proof_questions,
         has_several_statements,
         is_multi_part_problem,
         proof_problems_with_answer,
         proof_problems_without_answer,
         remove_options,
-        split_into_several_problems,
+        split_math_word_problems,
+        split_mcq_statements,
+        split_proof_questions,
 )
 from alphaproof.formalize.data_cleaning.records import (
         derived_record,
@@ -203,6 +206,72 @@ def add_proof_rows(
         )
 
 
+def clean_proof_problems(
+        indexed_records: list[tuple[int, dict]],
+        model: Qwen3,
+        results: list[CleanResult],
+        timers: Timers,
+) -> None:
+    """Clean proof records."""
+    if not indexed_records:
+        return
+
+    records = [record for _, record in indexed_records]
+    try:
+        several_question_outputs = timers.timed(
+                'has_several_proof_questions',
+                has_several_proof_questions,
+                records,
+                model,
+        )
+    except Exception as error:
+        fail_indexed_records(indexed_records, results, error)
+        return
+
+    split_records = []
+    for (record_ix, record), (has_several_questions, answer) in zip(
+            indexed_records,
+            several_question_outputs,
+    ):
+        result = results[record_ix]
+        result.boolean_outputs[
+                'has_several_proof_questions'
+        ] = has_several_questions
+        result.boolean_outputs['has_several_proof_questions_answer'] = answer
+        if has_several_questions:
+            split_records.append((record_ix, record))
+        else:
+            result.output_rows.append(formalization_record(record))
+
+    if not split_records:
+        return
+
+    try:
+        split_outputs = timers.timed(
+                'split_proof_questions',
+                split_proof_questions,
+                [record for _, record in split_records],
+                model,
+        )
+    except Exception as error:
+        fail_indexed_records(split_records, results, error)
+        return
+
+    for (record_ix, record), problems in zip(split_records, split_outputs):
+        results[record_ix].json_outputs['split_proof_questions'] = problems
+        for problem_ix, problem in enumerate(problems):
+            results[record_ix].output_rows.append(
+                    formalization_record(
+                            derived_record(
+                                    record,
+                                    problem['problem'],
+                                    problem.get('answer'),
+                                    f'part_{problem_ix}',
+                            )
+                    )
+            )
+
+
 def clean_math_word_problems(
         indexed_records: list[tuple[int, dict]],
         model: Qwen3,
@@ -250,8 +319,8 @@ def clean_math_word_problems(
     if split_records:
         try:
             split_outputs = timers.timed(
-                    'split_into_several_problems',
-                    split_into_several_problems,
+                    'split_math_word_problems',
+                    split_math_word_problems,
                     [record for _, record in split_records],
                     model,
             )
@@ -259,9 +328,7 @@ def clean_math_word_problems(
             fail_indexed_records(split_records, results, error)
         else:
             for (record_ix, record), problems in zip(split_records, split_outputs):
-                results[record_ix].json_outputs[
-                        'split_into_several_problems'
-                ] = problems
+                results[record_ix].json_outputs['split_math_word_problems'] = problems
                 for problem_ix, problem in enumerate(problems):
                     jobs.append(
                             proof_job(
@@ -316,8 +383,8 @@ def clean_mcqs(
     if split_records:
         try:
             split_outputs = timers.timed(
-                    'split_into_several_problems',
-                    split_into_several_problems,
+                    'split_mcq_statements',
+                    split_mcq_statements,
                     [record for _, record in split_records],
                     model,
             )
@@ -325,9 +392,7 @@ def clean_mcqs(
             fail_indexed_records(split_records, results, error)
         else:
             for (record_ix, record), problems in zip(split_records, split_outputs):
-                results[record_ix].json_outputs[
-                        'split_into_several_problems'
-                ] = problems
+                results[record_ix].json_outputs['split_mcq_statements'] = problems
                 for problem_ix, problem in enumerate(problems):
                     jobs.append(
                             proof_job(
@@ -405,8 +470,7 @@ def clean_records(
             non_missing_records.append((record_ix, record))
 
     if question_type == 'proof':
-        for record_ix, record in non_missing_records:
-            results[record_ix].output_rows.append(formalization_record(record))
+        clean_proof_problems(non_missing_records, model, results, timers)
     elif question_type == 'math-word-problem':
         clean_math_word_problems(non_missing_records, model, results, timers)
     elif question_type == 'MCQ':

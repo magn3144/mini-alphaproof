@@ -34,9 +34,9 @@ $$x^3 - 9x^2 + 42x + a$$ form an arithmetic progression and are not all real.
 </problem>
 """
 
-MULTI_PART_PROMPT = """<task>
-Decide whether a math problem contains multiple separate subproblems that should be
-split before formalization.
+MATH_WORD_MULTI_PART_PROMPT = """<task>
+Decide whether a math word problem contains multiple separate subproblems that
+should be split before formalization.
 </task>
 
 <instructions>
@@ -59,6 +59,43 @@ Answer NO when the problem is one task, even if it asks to find all solutions.
 <problem>
 Find all positive integers $n$ such that there exists a prime number $p$ such that
 $p^n-(p-1)^n$ is a power of 3.
+</problem>
+<answer>NO</answer>
+</example>
+</examples>
+
+<problem>
+{problem}
+</problem>
+"""
+
+PROOF_SEVERAL_QUESTIONS_PROMPT = r"""<task>
+Decide whether a proof problem contains multiple separate proof questions that
+should be split before formalization.
+</task>
+
+<instructions>
+Answer only YES or NO.
+Answer YES when the problem asks for multiple numbered or lettered proof tasks,
+such as (1), (2), (a), (b), or several separate prove/show questions.
+Answer NO when the problem is one proof task, even if the theorem has multiple
+hypotheses, multiple cases, or several statements that naturally belong to one
+conclusion.
+</instructions>
+
+<examples>
+<example>
+<problem>
+(a) Prove that if $n$ is odd, then $n^2$ is odd. (b) Prove that if $n^2$ is
+odd, then $n$ is odd.
+</problem>
+<answer>YES</answer>
+</example>
+
+<example>
+<problem>
+Prove that for every integer $n$, if $n$ is odd, then $n^2$ is odd and
+$n^2 \equiv 1 \pmod 8$.
 </problem>
 <answer>NO</answer>
 </example>
@@ -112,21 +149,19 @@ D: $2^{20}-1$
 </problem>
 """
 
-SPLIT_PROBLEM_PROMPT = r"""<task>
-Split a math problem into separate standalone problems.
+MATH_WORD_SPLIT_PROBLEM_PROMPT = r"""<task>
+Split a math word problem into separate standalone problems.
 </task>
 
 <instructions>
 Return only valid JSON.
 Use this exact schema:
-{"problems": [{"problem": "standalone problem text", "answer": null}]}
+{"problems": [{"problem": "standalone problem text", "answer": "extracted answer if available, otherwise null"}]}
 
-Each output problem must be understandable without the original combined problem.
-If the input is a multi-part problem, split each part into one problem.
-If the input is a multiple-choice problem whose options are separate statements,
-turn each option into one true/false problem.
+Each output problem must be self contained.
+Split each numbered, lettered, or otherwise separate part into one problem.
 Use the provided answer only to assign each split problem's answer when possible.
-For true/false statement options, use "true" or "false" as the answer.
+If a split problem doesnt have an answer assigned, use null for its answer.
 </instructions>
 
 <example>
@@ -138,6 +173,27 @@ For true/false statement options, use "true" or "false" as the answer.
 {"problems": [{"problem": "Find $x+1$ if $x=2$.", "answer": "3"}, {"problem": "Find $y+2$ if $y=3$.", "answer": "5"}]}
 </output>
 </example>
+
+<problem>
+{problem}
+</problem>
+<answer>{answer}</answer>
+"""
+
+MCQ_SPLIT_PROBLEM_PROMPT = r"""<task>
+Split a multiple-choice math problem whose options are separate statements into
+standalone true/false problems.
+</task>
+
+<instructions>
+Return only valid JSON.
+Use this exact schema:
+{"problems": [{"problem": "standalone statement text", "answer": "true"}]}
+
+Each output problem must be self contained.
+Turn each statement option into one true/false problem.
+Use the provided answer to decide which statements are true or false.
+</instructions>
 
 <example>
 <problem>
@@ -157,6 +213,46 @@ D: Two lines perpendicular to the same line in the same plane are parallel.
 {problem}
 </problem>
 <answer>{answer}</answer>
+"""
+
+PROOF_SPLIT_PROBLEM_PROMPT = r"""<task>
+Split a proof problem into separate standalone proof problems.
+</task>
+
+<instructions>
+Return only valid JSON.
+Use this exact schema:
+{"problems": [{"problem": "standalone proof problem text"}]}
+
+Each output problem must be self contained.
+Split each numbered, lettered, or otherwise separate proof task into one proof
+problem. Keep each output as a proof problem. Do not include a solution or
+explanation. Do not include an answer field.
+</instructions>
+
+<example>
+<problem>
+NT2 BUL
+
+A positive integer is called a repunit, if it is written only by ones. The
+repunit with $n$ digits will be denoted by $\underbrace{11 \ldots 1}_{n}$.
+Prove that:
+
+a) the repunit $\underbrace{11 \ldots 1}_{n}$ is divisible by 37 if and only
+if $n$ is divisible by 3;
+
+b) there exists a positive integer $k$ such that the repunit
+$\underbrace{11 \ldots 1}_{n}$ is divisible by 41 if and only if $n$ is
+divisible by $k$.
+</problem>
+<output>
+{"problems": [{"problem": "A positive integer is called a repunit, if it is written only by ones. The repunit with $n$ digits will be denoted by $\\underbrace{11 \\ldots 1}_{n}$. Prove that the repunit $\\underbrace{11 \\ldots 1}_{n}$ is divisible by 37 if and only if $n$ is divisible by 3."}, {"problem": "A positive integer is called a repunit, if it is written only by ones. The repunit with $n$ digits will be denoted by $\\underbrace{11 \\ldots 1}_{n}$. Prove that there exists a positive integer $k$ such that the repunit $\\underbrace{11 \\ldots 1}_{n}$ is divisible by 41 if and only if $n$ is divisible by $k$."}]}
+</output>
+</example>
+
+<problem>
+{problem}
+</problem>
 """
 
 REMOVE_OPTIONS_PROMPT = r"""<task>
