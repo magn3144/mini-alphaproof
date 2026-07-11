@@ -35,6 +35,6 @@ They might differ from the pseudocde, which is ok.
  - The autoformalizer only generates one lean problem per natural language problem.
  - The dataset used is AI-MO/NuminaMath-1.5. Autoformalization is used in this project to convert problems to Lean.
  - Models used:
-  - Data cleaning: Qwen3-32B
+  - Data cleaning: Qwen3.6-27B
   - Autoformalization: Goedel-Prover-V2-32B
   - Prover: Salesforce--codet5p-220m

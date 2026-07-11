@@ -1,6 +1,15 @@
 import torch
 
-from alphaproof.formalize.qwen3 import Qwen3, Qwen3_8B
+from alphaproof.formalize.qwen3 import Qwen3, Qwen3_9B
+
+
+CLEANING_MODEL_ALIASES = {
+    'qwen3.6-27b': Qwen3,
+    'qwen/qwen3.6-27b': Qwen3,
+    'qwen3.5-9b': Qwen3_9B,
+    'qwen/qwen3.5-9b': Qwen3_9B,
+}
+DEFAULT_CLEANING_MODEL = 'qwen3.6-27b'
 
 
 def is_out_of_memory_error(error: Exception) -> bool:
@@ -28,6 +37,7 @@ def clear_accelerator_cache() -> None:
 
 
 def load_cleaning_model(
+        model_name: str,
         device: str | None,
         torch_dtype: str,
         quantization: str | None,
@@ -45,7 +55,12 @@ def load_cleaning_model(
     if torch_dtype == 'auto' and model_device.type == 'mps':
         torch_dtype = 'float16'
 
-    qwen = Qwen3_8B(
+    model_class = CLEANING_MODEL_ALIASES.get(model_name.lower())
+    if model_class is None:
+        choices = ', '.join(sorted(CLEANING_MODEL_ALIASES))
+        raise ValueError(f'model must be one of: {choices}.')
+
+    qwen = model_class(
             device=model_device,
             torch_dtype=torch_dtype,
             quantization=quantization,

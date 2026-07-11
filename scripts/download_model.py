@@ -5,6 +5,10 @@ from huggingface_hub import snapshot_download
 
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / 'models'
+MODEL_ALIASES = {
+    'qwen3.6-27b': 'Qwen/Qwen3.6-27B',
+    'qwen3.5-9b': 'Qwen/Qwen3.5-9B',
+}
 
 
 def model_dir_name(model_name: str) -> str:
@@ -14,6 +18,7 @@ def model_dir_name(model_name: str) -> str:
 
 def download_model(model_name: str, models_dir: Path = MODELS_DIR) -> Path:
     """Download a model and tokenizer from Hugging Face into models_dir."""
+    model_name = MODEL_ALIASES.get(model_name.lower(), model_name)
     output_dir = models_dir / model_dir_name(model_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -31,7 +36,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         'model_name',
-        help='Hugging Face model name, for example Salesforce/codet5p-220m.',
+        help=(
+            'Hugging Face model name, or alias qwen3.6-27b or qwen3.5-9b.'
+        ),
     )
     parser.add_argument(
         '--models-dir',

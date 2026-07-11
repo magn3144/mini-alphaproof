@@ -6,7 +6,11 @@ from time import perf_counter
 from typing import Any
 
 from alphaproof.formalize.data_cleaning.filter_problems import FILTERED_NUMINA_MATH_1_5_PATH
-from alphaproof.formalize.data_cleaning.model import load_cleaning_model
+from alphaproof.formalize.data_cleaning.model import (
+        CLEANING_MODEL_ALIASES,
+        DEFAULT_CLEANING_MODEL,
+        load_cleaning_model,
+)
 from alphaproof.formalize.data_cleaning.paths import CLEANED_NUMINA_MATH_1_5_PATH
 from alphaproof.formalize.data_cleaning.pipeline import Timers, clean_records
 from alphaproof.formalize.data_cleaning.records import (
@@ -215,6 +219,7 @@ def clean_rows(
         output_path: Path = CLEANED_NUMINA_MATH_1_5_PATH,
         print_summary: bool = False,
         batch_size: int = 4,
+        model: str = DEFAULT_CLEANING_MODEL,
         device: str | None = None,
         torch_dtype: str = 'auto',
         quantization: str | None = None,
@@ -224,6 +229,7 @@ def clean_rows(
         raise ValueError('batch_size must be at least 1.')
 
     qwen = load_cleaning_model(
+            model,
             device,
             torch_dtype,
             quantization,
@@ -271,6 +277,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--summary', action='store_true')
     parser.add_argument('--output-path', type=Path, default=CLEANED_NUMINA_MATH_1_5_PATH)
     parser.add_argument('--batch-size', type=int, default=4)
+    parser.add_argument(
+            '--model',
+            choices=sorted(CLEANING_MODEL_ALIASES),
+            default=DEFAULT_CLEANING_MODEL,
+    )
     parser.add_argument('--device', choices=['cpu', 'mps', 'cuda'])
     parser.add_argument('--torch-dtype', default='auto')
     parser.add_argument('--quantization', choices=['4bit', '8bit'])
@@ -284,6 +295,7 @@ if __name__ == '__main__':
             output_path=args.output_path,
             print_summary=args.summary,
             batch_size=args.batch_size,
+            model=args.model,
             device=args.device,
             torch_dtype=args.torch_dtype,
             quantization=args.quantization,

@@ -11,10 +11,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from alphaproof.core.config import MODELS_DIR
 
 
-QWEN3_MODEL_NAME = 'Qwen/Qwen3-32B'
+QWEN3_MODEL_NAME = 'Qwen/Qwen3.6-27B'
 QWEN3_MODEL_DIR = MODELS_DIR / QWEN3_MODEL_NAME.replace('/', '--')
-QWEN3_8B_MODEL_NAME = 'Qwen/Qwen3-8B'
-QWEN3_8B_MODEL_DIR = MODELS_DIR / QWEN3_8B_MODEL_NAME.replace('/', '--')
+QWEN3_9B_MODEL_NAME = 'Qwen/Qwen3.5-9B'
+QWEN3_9B_MODEL_DIR = MODELS_DIR / QWEN3_9B_MODEL_NAME.replace('/', '--')
 
 
 class Qwen3:
@@ -204,20 +204,20 @@ class Qwen3:
         return torch.device('cpu')
 
 
-class Qwen3_8B(Qwen3):
-    """Local wrapper for loading and sampling Qwen3-8B."""
+class Qwen3_9B(Qwen3):
+    """Local wrapper for loading and sampling Qwen3.5-9B."""
 
-    model_name = QWEN3_8B_MODEL_NAME
+    model_name = QWEN3_9B_MODEL_NAME
 
     def __init__(
         self,
-        model_dir: str | Path = QWEN3_8B_MODEL_DIR,
+        model_dir: str | Path = QWEN3_9B_MODEL_DIR,
         device: str | torch.device | None = None,
         torch_dtype: torch.dtype | str = 'auto',
         trust_remote_code: bool = True,
         quantization: str | None = None,
     ):
-        """Store Qwen3-8B settings without loading weights until load()."""
+        """Store Qwen3.5-9B settings without loading weights until load()."""
         super().__init__(
             model_dir=model_dir,
             device=device,
