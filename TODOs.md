@@ -3,4 +3,6 @@
 - [X] Organize code in data_cleaning.py
 - [X] Understand how data cleaning script batches problems of the same type.
 - [X] Add splitter for proof questions.
-- [ ] Add JSON schema to model in data cleaning pipeline.
+- [X] Add JSON schema to model in data cleaning pipeline.
+- [ ] Run a cleaning run.
+- [ ] Give qwen a max batch size parameter to avoid memory problems.
