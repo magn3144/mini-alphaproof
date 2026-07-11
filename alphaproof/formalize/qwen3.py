@@ -1,3 +1,4 @@
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -55,10 +56,13 @@ class Qwen3:
             self.model_dir,
             trust_remote_code=self.trust_remote_code,
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_dir,
-            **self._model_load_kwargs(),
-        )
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_dir,
+                **self._model_load_kwargs(),
+            )
+        except ValueError as error:
+            self._raise_model_load_error(error)
         if self.quantization is None:
             self.model.to(self.device)
         self.model.eval()
@@ -161,6 +165,26 @@ class Qwen3:
         """Raise a clear error if load() has not been called."""
         if self.tokenizer is None or self.model is None:
             raise RuntimeError('Call load() before sampling.')
+
+    def _raise_model_load_error(self, error: ValueError) -> None:
+        """Raise an actionable error for unsupported local model configs."""
+        message = str(error)
+        if 'Transformers does not recognize this architecture' not in message:
+            raise error
+
+        try:
+            transformers_version = version('transformers')
+        except PackageNotFoundError:
+            transformers_version = 'unknown'
+
+        raise RuntimeError(
+            f'{self.model_name} at {self.model_dir} uses a model architecture '
+            'that this Transformers install does not support. '
+            f'Installed Transformers version: {transformers_version}. '
+            'Install Transformers from source, then rerun the data cleaning '
+            'command: uv pip install git+https://github.com/huggingface/'
+            'transformers.git'
+        ) from error
 
     def _model_load_kwargs(self) -> dict[str, Any]:
         """Build model loading options, including optional quantization."""
