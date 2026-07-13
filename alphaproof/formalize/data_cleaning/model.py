@@ -41,6 +41,9 @@ def load_cleaning_model(
         device: str | None,
         torch_dtype: str,
         quantization: str | None,
+        parallelism: str = 'none',
+        seed: int = 0,
+        max_batch_size: int | None = None,
 ) -> Qwen3:
     """Load the model used for data cleaning."""
     if device is not None:
@@ -64,7 +67,9 @@ def load_cleaning_model(
             device=model_device,
             torch_dtype=torch_dtype,
             quantization=quantization,
+            parallelism=parallelism,
+            seed=seed,
+            max_batch_size=max_batch_size,
     )
     qwen.load()
-    print(f'Loaded {qwen.model_name} from {qwen.model_dir} on {qwen.device}.')
     return qwen

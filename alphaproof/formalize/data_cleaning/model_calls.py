@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Callable
 
 from alphaproof.formalize.data_cleaning.prompts import (
         ANSWER_PROOF_PROMPT,
@@ -74,12 +74,29 @@ def parse_json_object(answer: str) -> dict[str, Any]:
         raise InvalidJsonOutput(answer, error) from error
 
 
+def parse_each(
+        outputs: list[Any],
+        parser: Callable[[Any], Any],
+) -> list[Any | Exception]:
+    """Parse outputs independently so one malformed completion stays local."""
+    parsed_outputs = []
+    for output in outputs:
+        if isinstance(output, Exception):
+            parsed_outputs.append(output)
+            continue
+        try:
+            parsed_outputs.append(parser(output))
+        except Exception as error:
+            parsed_outputs.append(error)
+    return parsed_outputs
+
+
 def sample_json_objects(
         prompts: list[str],
         model: Qwen3,
         json_schema: dict[str, Any],
         max_new_tokens: int = JSON_MAX_NEW_TOKENS,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any] | Exception]:
     """Sample and parse one JSON object for each prompt."""
     answers = model.sample(
             prompts,
@@ -88,13 +105,13 @@ def sample_json_objects(
             top_p=0.2,
             json_schema=json_schema,
     )
-    return [parse_json_object(answer) for answer in answers]
+    return parse_each(answers, parse_json_object)
 
 
 def sample_yes_no(
         prompts: list[str],
         model: Qwen3,
-) -> list[tuple[bool, str]]:
+) -> list[tuple[bool, str] | Exception]:
     """Sample and parse one YES/NO answer for each prompt."""
     answers = model.sample(
             prompts,
@@ -102,13 +119,13 @@ def sample_yes_no(
             temperature=0.1,
             top_p=0.2,
     )
-    return [(parse_yes_no(answer), answer) for answer in answers]
+    return parse_each(answers, lambda answer: (parse_yes_no(answer), answer))
 
 
 def has_missing_information(
         records: list[dict],
         model: Qwen3,
-) -> list[tuple[bool, str]]:
+) -> list[tuple[bool, str] | Exception]:
     """Return whether each problem is missing information and the raw answer."""
     prompts = [
             fill_prompt(MISSING_INFORMATION_PROMPT, problem=record['problem'].strip())
@@ -120,7 +137,7 @@ def has_missing_information(
 def is_multi_part_problem(
         records: list[dict],
         model: Qwen3,
-) -> list[tuple[bool, str]]:
+) -> list[tuple[bool, str] | Exception]:
     """Return whether each problem should be split and the raw answer."""
     prompts = [
             fill_prompt(
@@ -135,7 +152,7 @@ def is_multi_part_problem(
 def has_several_proof_questions(
         records: list[dict],
         model: Qwen3,
-) -> list[tuple[bool, str]]:
+) -> list[tuple[bool, str] | Exception]:
     """Return whether each proof problem should be split and the raw answer."""
     prompts = [
             fill_prompt(
@@ -150,7 +167,7 @@ def has_several_proof_questions(
 def has_several_statements(
         records: list[dict],
         model: Qwen3,
-) -> list[tuple[bool, str]]:
+) -> list[tuple[bool, str] | Exception]:
     """Return whether each MCQ has statement options and the raw answer."""
     prompts = [
             fill_prompt(SEVERAL_STATEMENTS_PROMPT, problem=record['problem'].strip())
@@ -188,7 +205,7 @@ def sample_split_problem_outputs(
         records: list[dict],
         model: Qwen3,
         json_schema: dict[str, Any],
-) -> list[list[dict]]:
+) -> list[list[dict] | Exception]:
     """Sample split-problem JSON outputs with the given prompt."""
     prompts = [
             fill_prompt(
@@ -204,13 +221,13 @@ def sample_split_problem_outputs(
             json_schema,
             max_new_tokens=SPLIT_MAX_NEW_TOKENS,
     )
-    return [parse_split_problems(parsed) for parsed in parsed_outputs]
+    return parse_each(parsed_outputs, parse_split_problems)
 
 
 def split_math_word_problems(
         records: list[dict],
         model: Qwen3,
-) -> list[list[dict]]:
+) -> list[list[dict] | Exception]:
     """Split each math word problem into standalone problem/answer pairs."""
     return sample_split_problem_outputs(
             MATH_WORD_SPLIT_PROBLEM_PROMPT,
@@ -223,7 +240,7 @@ def split_math_word_problems(
 def split_mcq_statements(
         records: list[dict],
         model: Qwen3,
-) -> list[list[dict]]:
+) -> list[list[dict] | Exception]:
     """Split each statement-option MCQ into true/false problems."""
     return sample_split_problem_outputs(
             MCQ_SPLIT_PROBLEM_PROMPT,
@@ -236,7 +253,7 @@ def split_mcq_statements(
 def split_proof_questions(
         records: list[dict],
         model: Qwen3,
-) -> list[list[dict]]:
+) -> list[list[dict] | Exception]:
     """Split each proof problem into standalone proof problems."""
     prompts = [
             fill_prompt(
@@ -251,10 +268,10 @@ def split_proof_questions(
             PROOF_SPLIT_PROBLEM_SCHEMA,
             max_new_tokens=SPLIT_MAX_NEW_TOKENS,
     )
-    return [
-            parse_split_problems(parsed, include_answer=False)
-            for parsed in parsed_outputs
-    ]
+    return parse_each(
+            parsed_outputs,
+            lambda parsed: parse_split_problems(parsed, include_answer=False),
+    )
 
 
 def parse_removed_options(parsed: dict[str, Any]) -> dict:
@@ -271,7 +288,7 @@ def parse_removed_options(parsed: dict[str, Any]) -> dict:
 def remove_options(
         records: list[dict],
         model: Qwen3,
-) -> list[dict]:
+) -> list[dict | Exception]:
     """Convert each normal MCQ into a direct problem with a direct answer."""
     prompts = [
             fill_prompt(
@@ -281,16 +298,16 @@ def remove_options(
             )
             for record in records
     ]
-    return [
-            parse_removed_options(parsed)
-            for parsed in sample_json_objects(prompts, model, REMOVE_OPTIONS_SCHEMA)
-    ]
+    return parse_each(
+            sample_json_objects(prompts, model, REMOVE_OPTIONS_SCHEMA),
+            parse_removed_options,
+    )
 
 
 def proof_problems_with_answer(
         jobs: list[dict],
         model: Qwen3,
-) -> list[str]:
+) -> list[str | Exception]:
     """Create proof problems that include known answers."""
     prompts = [
             fill_prompt(
@@ -308,7 +325,7 @@ def proof_problems_with_answer(
 def proof_problems_without_answer(
         jobs: list[dict],
         model: Qwen3,
-) -> list[str]:
+) -> list[str | Exception]:
     """Create proof problems without exposing answers to the model."""
     prompts = [
             fill_prompt(
@@ -322,12 +339,20 @@ def proof_problems_without_answer(
     )
 
 
-def parse_proof_problems(parsed_outputs: list[dict[str, Any]]) -> list[str]:
+def parse_proof_problems(
+        parsed_outputs: list[dict[str, Any] | Exception],
+) -> list[str | Exception]:
     """Parse proof-problem JSON outputs."""
     proof_problems = []
     for parsed in parsed_outputs:
-        proof_problem = parsed.get('problem')
-        if not isinstance(proof_problem, str) or not proof_problem.strip():
-            raise ValueError(f'Expected proof problem text, got: {parsed!r}')
-        proof_problems.append(proof_problem.strip())
+        if isinstance(parsed, Exception):
+            proof_problems.append(parsed)
+            continue
+        try:
+            proof_problem = parsed.get('problem')
+            if not isinstance(proof_problem, str) or not proof_problem.strip():
+                raise ValueError(f'Expected proof problem text, got: {parsed!r}')
+            proof_problems.append(proof_problem.strip())
+        except Exception as error:
+            proof_problems.append(error)
     return proof_problems

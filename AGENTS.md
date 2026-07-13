@@ -7,6 +7,7 @@
 - Always place imports at the top of files. Not inside functions.
 - Backward compatability doesnt matter, it just complicates the code unnecessarily.
 - Write code as simple as possible, without complicated structures and unnecessary fallbacks. If you can remove more code than you write as you complete a task, thats great.
+- After writing code fix any potential Pylance errors.
 
 
 # Design choices

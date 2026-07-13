@@ -25,7 +25,7 @@ from alphaproof.formalize.data_cleaning.records import (
         failed_record,
         formalization_record,
 )
-from alphaproof.formalize.qwen3 import Qwen3
+from alphaproof.formalize.qwen3 import Qwen3, TensorParallelError
 
 
 @dataclass
@@ -52,11 +52,17 @@ class Timers:
 
     def timed(self, name: str, function: Any, *args: Any) -> Any:
         """Call a function and record how long it takes."""
+        model = next((arg for arg in args if isinstance(arg, Qwen3)), None)
+        previous_stage = model.metric_stage if model is not None else None
+        if model is not None:
+            model.metric_stage = name
         start = perf_counter()
         try:
             return function(*args)
         finally:
             self.add(name, perf_counter() - start)
+            if model is not None and previous_stage is not None:
+                model.metric_stage = previous_stage
 
 
 def record_error(result: CleanResult, error: Exception) -> None:
@@ -79,6 +85,8 @@ def fail_indexed_records(
         error: Exception,
 ) -> None:
     """Mark each indexed source record as failed."""
+    if isinstance(error, TensorParallelError):
+        raise error
     if is_out_of_memory_error(error):
         clear_accelerator_cache()
 
@@ -162,6 +170,13 @@ def add_proof_rows(
             )
         else:
             for job, proof_problem in zip(jobs_with_answer, proof_problems):
+                if isinstance(proof_problem, Exception):
+                    fail_record_result(
+                            job['record'],
+                            results[job['record_ix']],
+                            proof_problem,
+                    )
+                    continue
                 append_proof_row(
                         job,
                         proof_problem,
@@ -197,6 +212,13 @@ def add_proof_rows(
         return
 
     for job, proof_problem in zip(jobs_without_answer, proof_problems):
+        if isinstance(proof_problem, Exception):
+            fail_record_result(
+                    job['record'],
+                    results[job['record_ix']],
+                    proof_problem,
+            )
+            continue
         append_proof_row(
                 job,
                 proof_problem,
@@ -229,11 +251,15 @@ def clean_proof_problems(
         return
 
     split_records = []
-    for (record_ix, record), (has_several_questions, answer) in zip(
+    for (record_ix, record), output in zip(
             indexed_records,
             several_question_outputs,
     ):
         result = results[record_ix]
+        if isinstance(output, Exception):
+            fail_record_result(record, result, output)
+            continue
+        has_several_questions, answer = output
         result.boolean_outputs[
                 'has_several_proof_questions'
         ] = has_several_questions
@@ -258,6 +284,9 @@ def clean_proof_problems(
         return
 
     for (record_ix, record), problems in zip(split_records, split_outputs):
+        if isinstance(problems, Exception):
+            fail_record_result(record, results[record_ix], problems)
+            continue
         results[record_ix].json_outputs['split_proof_questions'] = problems
         for problem_ix, problem in enumerate(problems):
             results[record_ix].output_rows.append(
@@ -296,11 +325,15 @@ def clean_math_word_problems(
 
     split_records = []
     jobs = []
-    for (record_ix, record), (is_multi_part, answer) in zip(
+    for (record_ix, record), output in zip(
             indexed_records,
             multi_part_outputs,
     ):
         result = results[record_ix]
+        if isinstance(output, Exception):
+            fail_record_result(record, result, output)
+            continue
+        is_multi_part, answer = output
         result.boolean_outputs['is_multi_part_problem'] = is_multi_part
         result.boolean_outputs['is_multi_part_problem_answer'] = answer
         if is_multi_part:
@@ -328,6 +361,9 @@ def clean_math_word_problems(
             fail_indexed_records(split_records, results, error)
         else:
             for (record_ix, record), problems in zip(split_records, split_outputs):
+                if isinstance(problems, Exception):
+                    fail_record_result(record, results[record_ix], problems)
+                    continue
                 results[record_ix].json_outputs['split_math_word_problems'] = problems
                 for problem_ix, problem in enumerate(problems):
                     jobs.append(
@@ -367,11 +403,15 @@ def clean_mcqs(
 
     split_records = []
     remove_records = []
-    for (record_ix, record), (several_statements, answer) in zip(
+    for (record_ix, record), output in zip(
             indexed_records,
             statement_outputs,
     ):
         result = results[record_ix]
+        if isinstance(output, Exception):
+            fail_record_result(record, result, output)
+            continue
+        several_statements, answer = output
         result.boolean_outputs['has_several_statements'] = several_statements
         result.boolean_outputs['has_several_statements_answer'] = answer
         if several_statements:
@@ -392,6 +432,9 @@ def clean_mcqs(
             fail_indexed_records(split_records, results, error)
         else:
             for (record_ix, record), problems in zip(split_records, split_outputs):
+                if isinstance(problems, Exception):
+                    fail_record_result(record, results[record_ix], problems)
+                    continue
                 results[record_ix].json_outputs['split_mcq_statements'] = problems
                 for problem_ix, problem in enumerate(problems):
                     jobs.append(
@@ -416,6 +459,9 @@ def clean_mcqs(
             fail_indexed_records(remove_records, results, error)
         else:
             for (record_ix, record), removed in zip(remove_records, removed_outputs):
+                if isinstance(removed, Exception):
+                    fail_record_result(record, results[record_ix], removed)
+                    continue
                 results[record_ix].json_outputs['remove_options'] = removed
                 jobs.append(
                         proof_job(
@@ -455,11 +501,15 @@ def clean_records(
         return results
 
     non_missing_records = []
-    for (record_ix, record), (missing_information, answer) in zip(
+    for (record_ix, record), output in zip(
             indexed_records,
             missing_outputs,
     ):
         result = results[record_ix]
+        if isinstance(output, Exception):
+            fail_record_result(record, result, output)
+            continue
+        missing_information, answer = output
         result.boolean_outputs['has_missing_information'] = missing_information
         result.boolean_outputs['has_missing_information_answer'] = answer
 
