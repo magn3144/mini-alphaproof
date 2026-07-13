@@ -5,7 +5,7 @@
 - [X] Add splitter for proof questions.
 - [X] Add JSON schema to model in data cleaning pipeline.
 - [X] Run a cleaning run.
-- [ ] Give qwen a max batch size parameter to avoid memory problems.
+- [X] Give qwen a max batch size parameter to avoid memory problems.
 - [ ] Make it run on two A100s to achieve a much larger batch size.
 - [ ] Check after the existence theorem has been created that it is not trivial.
 - [ ] Set up data version control.

@@ -136,7 +136,7 @@ class Qwen3:
         assert tokenizer is not None
         assert model is not None
 
-        encoded = self._encode_prompts(prompts, tokenizer)
+        encoded = self.encode_prompts(prompts, tokenizer)
         encoded = {
             name: tensor.to(self.device)
             for name, tensor in encoded.items()
@@ -197,7 +197,7 @@ class Qwen3:
                 'Tensor-parallel ranks produced different completions.'
             )
 
-    def _encode_prompts(
+    def encode_prompts(
         self,
         prompts: list[str],
         tokenizer: Any,
