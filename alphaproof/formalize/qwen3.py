@@ -11,10 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import transformers.tokenization_utils_base as transformers_tokenization_utils_base
 
 # lm-format-enforcer 0.11.3 still imports the removed Transformers 4 path.
-sys.modules.setdefault(
-    'transformers.tokenization_utils',
-    transformers_tokenization_utils_base,
-)
+sys.modules['transformers.tokenization_utils'] = transformers_tokenization_utils_base
 
 from lmformatenforcer import JsonSchemaParser
 from lmformatenforcer.integrations.transformers import (
