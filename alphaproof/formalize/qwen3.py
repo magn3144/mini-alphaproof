@@ -1,8 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
-from dataclasses import asdict, dataclass
 from pathlib import Path
 import sys
-from time import perf_counter
 from typing import Any
 
 import torch
@@ -30,21 +28,6 @@ PARALLELISM_MODES = {'none', 'balanced', 'tensor', 'data'}
 
 class TensorParallelError(RuntimeError):
     """Raised when tensor-parallel ranks can no longer safely continue."""
-
-
-@dataclass
-class ModelCall:
-    """Metrics for one actual model.generate call."""
-
-    stage: str
-    batch_size: int
-    prompt_tokens: int
-    generated_tokens: int
-    seconds: float
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return this call as JSON-compatible data."""
-        return asdict(self)
 
 
 class Qwen3:
@@ -85,8 +68,6 @@ class Qwen3:
         self.max_batch_size = max_batch_size
         self.tokenizer: Any | None = None
         self.model: Any | None = None
-        self.metric_stage = 'sample'
-        self.model_calls: list[ModelCall] = []
         self._sample_index = 0
 
     def load(self) -> 'Qwen3':
@@ -163,7 +144,6 @@ class Qwen3:
         generate_kwargs = self._generate_kwargs(tokenizer, json_schema)
 
         self._set_call_seed()
-        start = perf_counter()
         try:
             with torch.no_grad():
                 generated = model.generate(
@@ -182,7 +162,6 @@ class Qwen3:
                     f'Tensor-parallel generation failed: {error}'
                 ) from error
             raise
-        seconds = perf_counter() - start
 
         prompt_length = encoded['input_ids'].shape[-1]
         completion_ids = generated[:, prompt_length:]
@@ -194,54 +173,8 @@ class Qwen3:
             self._clean_completion(completion)
             for completion in completions
         ]
-        self.model_calls.append(
-            ModelCall(
-                stage=self.metric_stage,
-                batch_size=len(prompts),
-                prompt_tokens=int(encoded['attention_mask'].sum().item()),
-                generated_tokens=self._count_generated_tokens(
-                    completion_ids,
-                    tokenizer.eos_token_id,
-                ),
-                seconds=seconds,
-            )
-        )
         self._verify_tensor_completions(completions)
         return completions
-
-    def reset_metrics(self) -> None:
-        """Reset measured model-call metrics after warmup."""
-        self.model_calls.clear()
-
-    def metrics(self) -> dict[str, Any]:
-        """Return aggregate and per-stage model-call metrics."""
-        prompt_tokens = sum(call.prompt_tokens for call in self.model_calls)
-        generated_tokens = sum(call.generated_tokens for call in self.model_calls)
-        generation_seconds = sum(call.seconds for call in self.model_calls)
-        stages: dict[str, dict[str, float | int]] = {}
-        for call in self.model_calls:
-            stage = stages.setdefault(call.stage, {'calls': 0, 'seconds': 0.0})
-            stage['calls'] += 1
-            stage['seconds'] += call.seconds
-        return {
-            'calls': len(self.model_calls),
-            'prompt_tokens': prompt_tokens,
-            'generated_tokens': generated_tokens,
-            'generation_seconds': generation_seconds,
-            'generated_tokens_per_second': (
-                generated_tokens / generation_seconds if generation_seconds else 0.0
-            ),
-            'total_tokens_per_second': (
-                (prompt_tokens + generated_tokens) / generation_seconds
-                if generation_seconds else 0.0
-            ),
-            'max_model_call_batch_size': max(
-                (call.batch_size for call in self.model_calls),
-                default=0,
-            ),
-            'stages': stages,
-            'model_calls': [call.to_dict() for call in self.model_calls],
-        }
 
     def _set_call_seed(self) -> None:
         """Set the deterministic seed stream for this actual model call."""
@@ -263,21 +196,6 @@ class Qwen3:
             raise TensorParallelError(
                 'Tensor-parallel ranks produced different completions.'
             )
-
-    def _count_generated_tokens(
-        self,
-        completion_ids: torch.Tensor,
-        eos_token_id: int | None,
-    ) -> int:
-        """Count generated tokens through the first EOS in each completion."""
-        if eos_token_id is None:
-            return int(completion_ids.numel())
-        count = 0
-        for token_ids in completion_ids.tolist():
-            count += len(token_ids)
-            if eos_token_id in token_ids:
-                count -= len(token_ids) - token_ids.index(eos_token_id) - 1
-        return count
 
     def _encode_prompts(
         self,

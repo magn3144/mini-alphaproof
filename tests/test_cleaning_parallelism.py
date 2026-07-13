@@ -1,11 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from alphaproof.formalize.data_cleaning.metrics import aggregate_model_metrics
 from alphaproof.formalize.data_cleaning.model_calls import parse_each
 from alphaproof.formalize.data_cleaning.parallel import ParallelContext
 from alphaproof.formalize.data_cleaning.pipeline import CleanResult, Timers
-from alphaproof.formalize.qwen3 import ModelCall, Qwen3, TensorParallelError
+from alphaproof.formalize.qwen3 import Qwen3, TensorParallelError
 
 
 class QwenTests(unittest.TestCase):
@@ -52,55 +51,13 @@ class QwenTests(unittest.TestCase):
                     with self.assertRaises(TensorParallelError):
                         model._verify_tensor_completions(['same'])
 
-    def test_model_metrics_include_actual_chunk_sizes(self) -> None:
-        model = Qwen3(model_dir='/tmp/model')
-        model.model_calls = [
-                ModelCall('one', 4, 10, 5, 2.0),
-                ModelCall('one', 2, 4, 3, 1.0),
-        ]
-
-        metrics = model.metrics()
-
-        self.assertEqual(metrics['calls'], 2)
-        self.assertEqual(metrics['max_model_call_batch_size'], 4)
-        self.assertEqual(metrics['generated_tokens_per_second'], 8 / 3)
-
-
-class ParsingAndMetricsTests(unittest.TestCase):
+class ParsingTests(unittest.TestCase):
     def test_outputs_are_parsed_independently(self) -> None:
         outputs = parse_each(['1', 'bad', '3'], int)
 
         self.assertEqual(outputs[0], 1)
         self.assertIsInstance(outputs[1], ValueError)
         self.assertEqual(outputs[2], 3)
-
-    def test_data_parallel_tokens_use_slower_rank_time(self) -> None:
-        rank_template = {
-                'calls': 1,
-                'max_model_call_batch_size': 4,
-                'stages': {},
-                'model_calls': [],
-        }
-        rank_metrics = [
-                {
-                        **rank_template,
-                        'prompt_tokens': 10,
-                        'generated_tokens': 20,
-                        'generation_seconds': 2.0,
-                },
-                {
-                        **rank_template,
-                        'prompt_tokens': 15,
-                        'generated_tokens': 30,
-                        'generation_seconds': 3.0,
-                },
-        ]
-
-        metrics = aggregate_model_metrics('data', rank_metrics)
-
-        self.assertEqual(metrics['generated_tokens_per_second'], 50 / 3)
-        self.assertEqual(metrics['total_tokens_per_second'], 75 / 3)
-
 
 class DataParallelMergeTests(unittest.TestCase):
     def test_strided_results_are_merged_in_original_order(self) -> None:

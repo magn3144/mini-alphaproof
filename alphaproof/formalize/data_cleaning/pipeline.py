@@ -52,17 +52,11 @@ class Timers:
 
     def timed(self, name: str, function: Any, *args: Any) -> Any:
         """Call a function and record how long it takes."""
-        model = next((arg for arg in args if isinstance(arg, Qwen3)), None)
-        previous_stage = model.metric_stage if model is not None else None
-        if model is not None:
-            model.metric_stage = name
         start = perf_counter()
         try:
             return function(*args)
         finally:
             self.add(name, perf_counter() - start)
-            if model is not None and previous_stage is not None:
-                model.metric_stage = previous_stage
 
 
 def record_error(result: CleanResult, error: Exception) -> None:

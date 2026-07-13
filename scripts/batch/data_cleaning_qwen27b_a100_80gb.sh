@@ -29,7 +29,6 @@ PARALLELISM="${PARALLELISM:-tensor}"
 SEED="${SEED:-0}"
 INPUT_PATH="${INPUT_PATH:-data/dataset/numina_math_1_5_filtered.jsonl}"
 OUTPUT_PATH="${OUTPUT_PATH:-data/dataset/numina_math_1_5_cleaned.jsonl}"
-METRICS_PATH="${METRICS_PATH:-runs/data_cleaning_${LSB_JOBID:-local}_metrics.json}"
 
 nvidia-smi
 
@@ -37,7 +36,6 @@ set -- -m alphaproof.formalize.data_cleaning.data_cleaning \
     "${ROWS_TO_CLEAN}" \
     --input-path "${INPUT_PATH}" \
     --output-path "${OUTPUT_PATH}" \
-    --metrics-path "${METRICS_PATH}" \
     --batch-size "${BATCH_SIZE}" \
     --max-model-batch-size "${MAX_MODEL_BATCH_SIZE}" \
     --parallelism "${PARALLELISM}" \

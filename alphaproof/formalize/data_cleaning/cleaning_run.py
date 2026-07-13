@@ -177,10 +177,9 @@ def clean_dataset(
         input_path: Path,
         output_path: Path,
         batch_size: int,
-) -> tuple[CleaningRun, float]:
-    """Clean measured source batches and return run state and elapsed time."""
+) -> CleaningRun:
+    """Clean source batches and return the run state."""
     run = CleaningRun()
-    start = perf_counter()
     input_file = None
     output_file = None
     if context.is_main:
@@ -224,7 +223,7 @@ def clean_dataset(
             input_file.close()
         if output_file is not None:
             output_file.close()
-    return run, perf_counter() - start
+    return run
 
 
 def data_cleaning_summary(run: CleaningRun) -> str:

@@ -18,7 +18,6 @@ class ParallelContext:
     local_rank: int = 0
     world_size: int = 1
     initialized: bool = False
-    max_source_batch_size: int = 0
 
     @property
     def is_main(self) -> bool:
@@ -42,18 +41,10 @@ class ParallelContext:
         """Clean a global batch according to the configured parallelism.
         This is where the batch of data is split if data parallelism is enabled."""
         if self.mode != 'data':
-            self.max_source_batch_size = max(
-                    self.max_source_batch_size,
-                    len(records),
-            )
             results = clean_records(records, model, timers)
             return results if self.is_main else None
 
         indexed_records = list(enumerate(records))[self.rank::self.world_size]
-        self.max_source_batch_size = max(
-                self.max_source_batch_size,
-                len(indexed_records),
-        )
         local_records = [record for _, record in indexed_records]
         local_results = clean_records(local_records, model, timers)
         indexed_results: list[tuple[int, CleanResult]] = [
@@ -80,16 +71,6 @@ class ParallelContext:
         if any(result is None for result in merged):
             raise RuntimeError('Missing result while merging data-parallel batch.')
         return [result for result in merged if result is not None]
-
-    def gather(self, value: Any) -> list[Any] | None:
-        """Gather one Python value per rank onto rank 0."""
-        if not self.initialized:
-            return [value]
-        gathered: list[Any] | None = (
-                [None] * self.world_size if self.is_main else None
-        )
-        dist.gather_object(value, gathered, dst=0)
-        return gathered
 
     def close(self) -> None:
         """Destroy the process group created for this run."""
