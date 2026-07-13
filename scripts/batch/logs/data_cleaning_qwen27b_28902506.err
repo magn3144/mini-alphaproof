@@ -1,0 +1,15 @@
+Loaded dependency [python3/3.13.11]: sqlite3/3.51.2
+Loaded dependency [python3/3.13.11]: gcc/14.3.0-binutils-2.44
+Loaded module: python3/3.13.11
+
+Loading python3/3.13.11
+  Loading requirement: sqlite3/3.51.2 gcc/14.3.0-binutils-2.44
+Loaded module: cuda/12.8.1
+[93mReadline features including tab completion have been disabled because
+no supported version of readline was found. To resolve this, install
+pyreadline3 on Windows or gnureadline on Linux/Mac.
+
+[39m[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/851 [00:00<?, ?it/s]Loading weights:  17%|█▋        | 147/851 [00:00<00:00, 1409.14it/s]Loading weights:  34%|███▍      | 288/851 [00:00<00:00, 1127.86it/s]Loading weights:  47%|████▋     | 404/851 [00:00<00:00, 1060.50it/s]Loading weights:  60%|██████    | 513/851 [00:00<00:00, 1067.88it/s]Loading weights:  73%|███████▎  | 622/851 [00:00<00:00, 1064.55it/s]Loading weights:  87%|████████▋ | 737/851 [00:00<00:00, 1084.47it/s]Loading weights:  99%|█████████▉| 846/851 [00:00<00:00, 1068.20it/s]Loading weights: 100%|██████████| 851/851 [00:00<00:00, 1091.12it/s]
+User defined signal 2

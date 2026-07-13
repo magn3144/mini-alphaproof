@@ -35,4 +35,3 @@ uv run --frozen python -m alphaproof.formalize.data_cleaning.data_cleaning \
     --batch-size "${BATCH_SIZE}" \
     --model qwen3.6-27b \
     --device cuda \
-    --torch-dtype bfloat16

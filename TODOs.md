@@ -4,5 +4,7 @@
 - [X] Understand how data cleaning script batches problems of the same type.
 - [X] Add splitter for proof questions.
 - [X] Add JSON schema to model in data cleaning pipeline.
-- [ ] Run a cleaning run.
+- [X] Run a cleaning run.
 - [ ] Give qwen a max batch size parameter to avoid memory problems.
+- [ ] Make it run on two A100s to achieve a much larger batch size.
+- [ ] Check after the existence theorem has been created that is it not trivial.
