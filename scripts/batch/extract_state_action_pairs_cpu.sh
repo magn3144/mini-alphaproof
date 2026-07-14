@@ -29,8 +29,8 @@ command -v lake >/dev/null 2>&1 || {
 INPUT_PATH="data/dataset/nemotron_math_proofs_v1_finished_lean_proofs.jsonl"
 RUN_DIR="data/runs/state_action_extraction_20000"
 ENV_DIR="${PWD}/${RUN_DIR}/venv"
-SETUP_MARKER="${RUN_DIR}/setup_v2.complete"
-SETUP_LOCK="${RUN_DIR}/setup_v2.lock"
+SETUP_MARKER="${RUN_DIR}/setup_v3.complete"
+SETUP_LOCK="${RUN_DIR}/setup_v3.lock"
 PART="${LSB_JOBINDEX:?Submit this file as an LSF job array with bsub}"
 SCRIPTS_PER_PART=2500
 START_LINE=$(( (PART - 1) * SCRIPTS_PER_PART + 1 ))
@@ -76,7 +76,12 @@ if [ "${SETUP_OWNER}" -eq 1 ]; then
     uv sync --frozen --extra lean-tracing
     (
         cd lean_project
-        lake update
+        if [ ! -d .lake/packages/mathlib ]; then
+            if ! lake update; then
+                echo "Mathlib cache download failed; building from source." >&2
+            fi
+        fi
+        lake build Mathlib
         lake build
     )
     touch "${SETUP_MARKER}"
