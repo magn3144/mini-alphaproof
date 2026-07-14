@@ -16,6 +16,19 @@ dependencies = [
     "transformers",
 ]
 
+[project.optional-dependencies]
+fast-kernels = [
+    "flash-linear-attention[cuda,conv1d]>=0.5.1; sys_platform == 'linux'",
+]
+
 [tool.uv.sources]
 leantree = { path = "vendor/leantree", editable = true }
 transformers = { git = "https://github.com/huggingface/transformers.git" }
+
+[tool.uv.extra-build-dependencies]
+causal-conv1d = [
+    { requirement = "torch", match-runtime = true },
+    "packaging",
+    "ninja",
+    "wheel",
+]

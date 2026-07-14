@@ -1,3 +1,4 @@
+## Data cleaning / formalization
 - [X] Fix errors in data cleaning script.
 - [X] Test data cleaning script with timer and LLM otputs printed to see why it takes so long to execute.
 - [X] Organize code in data_cleaning.py
@@ -7,5 +8,11 @@
 - [X] Run a cleaning run.
 - [X] Give qwen a max batch size parameter to avoid memory problems.
 - [ ] Make it run on two A100s to achieve a much larger batch size.
-- [ ] Check after the existence theorem has been created that it is not trivial.
-- [ ] Set up data version control.
+- [X] Check after the existence theorem has been created that it is not trivial.
+- [ ] Generate SFT dataset from finished lean proofs.
+- [ ] Make formalization pipeline run on two A100 80GB GPUs.
+- [ ] Run formalization pipeline.
+
+## Training
+- [ ] Train on SFT dataset.
+- [ ] Train on formalized theorems using AlphaProof.
