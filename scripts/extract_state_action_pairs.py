@@ -398,8 +398,13 @@ def build_batch(
     ]
     failed = [record for record in candidates if record not in valid]
     build_output = (result.stdout + result.stderr).strip()
-    error_text = build_output[-8000:] or 'Lean did not produce an .olean file.'
-    build_errors = {record.source_line: error_text for record in failed}
+    build_errors = {
+        record.source_line: build_error_for_record(
+            build_output,
+            record.source_line,
+        )
+        for record in failed
+    }
 
     for record in failed:
         module_path(workspace, record.source_line).unlink(missing_ok=True)
@@ -407,6 +412,18 @@ def build_batch(
         write_root_module(workspace, valid)
         run_command(['lake', 'build'], workspace)
     return valid, build_errors
+
+
+def build_error_for_record(build_output: str, source_line: int) -> str:
+    """Return only the Lean diagnostics belonging to one generated module."""
+    filename = f'Proof_{source_line:09d}.lean:'
+    diagnostics = []
+    for line in build_output.splitlines():
+        if filename in line and line not in diagnostics:
+            diagnostics.append(line)
+    if diagnostics:
+        return '\n'.join(diagnostics)[-8000:]
+    return build_output[-8000:] or 'Lean did not produce an .olean file.'
 
 
 def trace_batch(
@@ -524,12 +541,32 @@ def pairs_from_trace(
             )
             for tactic in tactics
         ]
-        for tactic, (start, end) in zip(tactics, ranges, strict=True):
+        redundant_nested = {
+            child_index
+            for child_index, (child_start, child_end) in enumerate(ranges)
+            if any(
+                parent_start <= child_start
+                and child_end <= parent_end
+                and (parent_start, parent_end) != (child_start, child_end)
+                and tactics[parent_index]['stateBefore']
+                == tactics[child_index]['stateBefore']
+                and tactics[parent_index]['stateAfter']
+                == tactics[child_index]['stateAfter']
+                for parent_index, (parent_start, parent_end) in enumerate(ranges)
+            )
+        }
+        for tactic_index, (tactic, (start, end)) in enumerate(
+            zip(tactics, ranges, strict=True)
+        ):
+            if tactic_index in redundant_nested:
+                rejected_by_line[source_line] += 1
+                continue
             contains_tactic = any(
                 start <= child_start
                 and child_end <= end
                 and (start, end) != (child_start, child_end)
-                for child_start, child_end in ranges
+                and child_index not in redundant_nested
+                for child_index, (child_start, child_end) in enumerate(ranges)
             )
             if contains_tactic:
                 rejected_by_line[source_line] += 1
