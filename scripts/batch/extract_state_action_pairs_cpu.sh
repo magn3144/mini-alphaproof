@@ -28,6 +28,9 @@ command -v lake >/dev/null 2>&1 || {
 
 INPUT_PATH="data/dataset/nemotron_math_proofs_v1_finished_lean_proofs.jsonl"
 RUN_DIR="data/runs/state_action_extraction_20000"
+ENV_DIR="${PWD}/${RUN_DIR}/venv"
+SETUP_MARKER="${RUN_DIR}/setup_v2.complete"
+SETUP_LOCK="${RUN_DIR}/setup_v2.lock"
 PART="${LSB_JOBINDEX:?Submit this file as an LSF job array with bsub}"
 SCRIPTS_PER_PART=2500
 START_LINE=$(( (PART - 1) * SCRIPTS_PER_PART + 1 ))
@@ -39,6 +42,7 @@ OUTPUT_PATH="${PART_DIR}/state_action_pairs.jsonl"
 WORK_DIR="${PART_DIR}/work"
 
 mkdir -p scripts/batch/logs "${PART_DIR}"
+export UV_PROJECT_ENVIRONMENT="${ENV_DIR}"
 
 if [ ! -f "${PART_INPUT}" ]; then
     sed -n "${START_LINE},${END_LINE}p" "${INPUT_PATH}" \
@@ -52,20 +56,34 @@ if [ "${NUM_SCRIPTS}" -ne "${SCRIPTS_PER_PART}" ]; then
     exit 1
 fi
 
-# All array tasks share the environment and Lean dependencies. Only one task
-# may install or build them at a time.
-(
-    flock 9
-    if [ ! -f "${RUN_DIR}/setup.complete" ]; then
-        uv sync --frozen --extra lean-tracing
-        (
-            cd lean_project
-            lake update
-            lake build
-        )
-        touch "${RUN_DIR}/setup.complete"
+# mkdir is atomic across DTU's shared filesystem, unlike advisory file locks.
+# One array task prepares a clean shared environment while the others wait.
+SETUP_OWNER=0
+while [ ! -f "${SETUP_MARKER}" ]; do
+    if mkdir "${SETUP_LOCK}" 2>/dev/null; then
+        SETUP_OWNER=1
+        break
     fi
-) 9> "${RUN_DIR}/setup.lock"
+    sleep 10
+done
+
+if [ "${SETUP_OWNER}" -eq 1 ]; then
+    cleanup_setup_lock() {
+        rmdir "${SETUP_LOCK}" 2>/dev/null || true
+    }
+    trap cleanup_setup_lock 0 1 2 15
+
+    uv sync --frozen --extra lean-tracing
+    (
+        cd lean_project
+        lake update
+        lake build
+    )
+    touch "${SETUP_MARKER}"
+
+    cleanup_setup_lock
+    trap - 0 1 2 15
+fi
 
 set -- -m scripts.extract_state_action_pairs \
     --input "${PART_INPUT}" \
