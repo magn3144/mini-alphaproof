@@ -6,7 +6,7 @@
 #BSUB -R "select[gpu80gb]"
 #BSUB -R "rusage[mem=12GB]"
 #BSUB -gpu "num=2:mode=exclusive_process"
-#BSUB -W 3:00
+#BSUB -W 4:00
 #BSUB -o scripts/parallelism_benchmark_%J.out
 #BSUB -e scripts/parallelism_benchmark_%J.err
 
