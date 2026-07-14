@@ -10,8 +10,9 @@
 - [ ] Make it run on two A100s to achieve a much larger batch size.
 - [X] Check after the existence theorem has been created that it is not trivial.
 - [ ] Generate SFT dataset from finished lean proofs.
-- [ ] Make formalization pipeline run on two A100 80GB GPUs.
+- [X] Make formalization pipeline run on two A100 80GB GPUs.
 - [ ] Run formalization pipeline.
+- [ ] Figure out which licences the datasets / models have.
 
 ## Training
 - [ ] Train on SFT dataset.

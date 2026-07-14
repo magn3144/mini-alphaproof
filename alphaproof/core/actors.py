@@ -89,7 +89,8 @@ def run_mcts(
         assert node.observation is not None
         network_sample_output = network.sample(str(node.observation))
         expand_node(node, network_sample_output.action_logprobs,
-                                environment, config.prior_temperature)
+                                environment, config.prior_temperature,
+                                config.tactic_timeout)
         backpropagate(
                 search_path,
                 network_sample_output.value,
@@ -150,6 +151,7 @@ def expand_node(
         network_action_logprobs: Dict[Action, float],
         environment: Environment,
         temperature: float,
+        tactic_timeout: float,
 ):
     """Expand a node by applying sampled actions in the environment."""
     node.evaluations += 1
@@ -164,7 +166,11 @@ def expand_node(
             continue
         # Immediately apply the actions in the environment.
         try:
-            state = environment.step(node.state_id, action)
+            state = environment.step(
+                node.state_id,
+                action,
+                tactic_timeout=tactic_timeout,
+            )
         except ValueError:
             # Invalid action encountered.
             continue
@@ -192,6 +198,7 @@ def expand_node(
                     },
                     environment,
                     temperature,
+                    tactic_timeout,
                 )
 
 

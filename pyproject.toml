@@ -20,6 +20,9 @@ dependencies = [
 fast-kernels = [
     "flash-linear-attention[cuda,conv1d]>=0.5.1; sys_platform == 'linux'",
 ]
+lean-tracing = [
+    "lean-dojo-v2==1.0.9",
+]
 
 [tool.uv.sources]
 leantree = { path = "vendor/leantree", editable = true }

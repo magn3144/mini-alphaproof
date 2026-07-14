@@ -130,7 +130,12 @@ class Environment:
         branch = self._env.proof_from_sorry(theorem)
         return self._state_from_branch(branch, theorem=theorem)
 
-    def step(self, state_id: int, action: Action) -> State:
+    def step(
+        self,
+        state_id: int,
+        action: Action,
+        tactic_timeout: float = 1.0,
+    ) -> State:
         """Applies the action in the given state, returns the new state."""
         if state_id not in self._branches:
             raise ValueError(f'Unknown state id: {state_id}')
@@ -164,7 +169,10 @@ class Environment:
             raise ValueError('Use focus_goal <i> before applying a tactic.')
 
         try:
-            branches = branch.apply_tactic(action)
+            branches = branch.apply_tactic(
+                action,
+                timeout=round(tactic_timeout * 1000),
+            )
         except Exception as exc:
             raise ValueError(f'Invalid tactic {tactic!r}: {exc}') from exc
         return self._state_from_branches(branches)

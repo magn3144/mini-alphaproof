@@ -31,6 +31,7 @@ class Config:
         self.num_actors = num_actors
         self.num_games = num_games
         self.num_simulations = num_simulations
+        self.tactic_timeout = 1.0
 
         # UCB formula
         self.pb_c_base = 3200
