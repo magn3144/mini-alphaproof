@@ -37,6 +37,19 @@ def derived_record(
     return derived
 
 
+def failed_derived_record(
+        record: dict,
+        problem: str,
+        suffix: str,
+        reason: str,
+) -> dict:
+    """Create a derived proof-problem row that failed data cleaning."""
+    derived = derived_record(record, problem, None, suffix)
+    derived['FAILED'] = reason
+    derived['theorem'] = None
+    return derived
+
+
 def write_record(output_file: Any, record: dict) -> None:
     """Write one JSONL row."""
     output_file.write(json.dumps(record, ensure_ascii=False) + '\n')

@@ -350,3 +350,57 @@ The sequence $\{a_n\}$ satisfies $a_1=2$ and $a_{n+1}=4a_n-3$. Find $a_{10}$.
 {problem}
 </problem>
 """
+
+TRIVIAL_EXISTENCE_THEOREM_PROMPT = r"""<task>
+Decide whether an answerless existence proof problem is mathematically trivial.
+</task>
+
+<instructions>
+Answer only YES or NO.
+Answer YES if the requested existence follows immediately from the wording, without
+solving any substantive part of the original problem. This includes merely claiming
+that a well-defined expression has a value, that a finite set has a number of
+elements, or that the original question has an answer.
+Answer NO if a proof must construct an object satisfying mathematical constraints,
+show that such an object exists, or show that an extremum is attained.
+Judge the proof problem as written. Its existence claim can be trivial even when
+computing the omitted answer would be difficult.
+</instructions>
+
+<examples>
+<example>
+<existence_theorem>
+Prove that there exists a value of $(3x-4)^2$ when $x=-2$.
+</existence_theorem>
+<answer>YES</answer>
+</example>
+
+<example>
+<existence_theorem>
+Prove that there exists a number of distinct positive factors of 81.
+</existence_theorem>
+<answer>YES</answer>
+</example>
+
+<example>
+<existence_theorem>
+Prove that there exist positive rational numbers $a$ and $b$ such that
+$\sqrt[b]{a}=ab$.
+</existence_theorem>
+<answer>NO</answer>
+</example>
+
+<example>
+<existence_theorem>
+Prove that there exists a least positive four-digit integer $x$ satisfying
+$x \equiv 1 \pmod 3$, $2x+5 \equiv 11 \pmod 8$,
+$-3x+2 \equiv 2x \pmod {13}$, and $5x-3 \equiv 12 \pmod 7$.
+</existence_theorem>
+<answer>NO</answer>
+</example>
+</examples>
+
+<existence_theorem>
+{existence_theorem}
+</existence_theorem>
+"""

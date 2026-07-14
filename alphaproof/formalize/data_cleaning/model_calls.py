@@ -12,6 +12,7 @@ from alphaproof.formalize.data_cleaning.prompts import (
         PROOF_SPLIT_PROBLEM_PROMPT,
         REMOVE_OPTIONS_PROMPT,
         SEVERAL_STATEMENTS_PROMPT,
+        TRIVIAL_EXISTENCE_THEOREM_PROMPT,
 )
 from alphaproof.formalize.data_cleaning.schemas import (
         ANSWER_PROOF_SCHEMA,
@@ -337,6 +338,21 @@ def proof_problems_without_answer(
     return parse_proof_problems(
             sample_json_objects(prompts, model, ANSWERLESS_PROOF_SCHEMA)
     )
+
+
+def is_trivial_existence_theorem(
+        proof_problems: list[str],
+        model: Qwen3,
+) -> list[tuple[bool, str] | Exception]:
+    """Return whether each answerless existence theorem is trivial."""
+    prompts = [
+            fill_prompt(
+                    TRIVIAL_EXISTENCE_THEOREM_PROMPT,
+                    existence_theorem=proof_problem.strip(),
+            )
+            for proof_problem in proof_problems
+    ]
+    return sample_yes_no(prompts, model)
 
 
 def parse_proof_problems(

@@ -11,6 +11,7 @@ from alphaproof.formalize.data_cleaning.model_calls import (
         has_missing_information,
         has_several_proof_questions,
         has_several_statements,
+        is_trivial_existence_theorem,
         is_multi_part_problem,
         proof_problems_with_answer,
         proof_problems_without_answer,
@@ -22,6 +23,7 @@ from alphaproof.formalize.data_cleaning.model_calls import (
 from alphaproof.formalize.data_cleaning.records import (
         derived_record,
         exception_message,
+        failed_derived_record,
         failed_record,
         formalization_record,
 )
@@ -205,6 +207,7 @@ def add_proof_rows(
         )
         return
 
+    existence_jobs = []
     for job, proof_problem in zip(jobs_without_answer, proof_problems):
         if isinstance(proof_problem, Exception):
             fail_record_result(
@@ -213,11 +216,59 @@ def add_proof_rows(
                     proof_problem,
             )
             continue
+        existence_jobs.append((job, proof_problem))
+
+    if not existence_jobs:
+        return
+
+    try:
+        trivial_outputs = timers.timed(
+                'is_trivial_existence_theorem',
+                is_trivial_existence_theorem,
+                [proof_problem for _, proof_problem in existence_jobs],
+                model,
+        )
+    except Exception as error:
+        fail_indexed_records(
+                [
+                        (job['record_ix'], job['record'])
+                        for job, _ in existence_jobs
+                ],
+                results,
+                error,
+        )
+        return
+
+    for (job, proof_problem), output in zip(existence_jobs, trivial_outputs):
+        result = results[job['record_ix']]
+        if isinstance(output, Exception):
+            fail_record_result(job['record'], result, output)
+            continue
+
+        is_trivial, answer = output
+        result.boolean_outputs.setdefault(
+                'is_trivial_existence_theorem', []
+        ).append(is_trivial)
+        result.boolean_outputs.setdefault(
+                'is_trivial_existence_theorem_answer', []
+        ).append(answer)
+        suffix = f'{job["suffix"]}_without_answer'
+        if is_trivial:
+            result.output_rows.append(
+                    failed_derived_record(
+                            job['record'],
+                            proof_problem,
+                            suffix,
+                            'trivial_existence_theorem',
+                    )
+            )
+            continue
+
         append_proof_row(
                 job,
                 proof_problem,
                 None,
-                f'{job["suffix"]}_without_answer',
+                suffix,
                 results,
         )
 

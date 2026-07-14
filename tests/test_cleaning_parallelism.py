@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 from alphaproof.formalize.data_cleaning.model_calls import parse_each
 from alphaproof.formalize.data_cleaning.parallel import ParallelContext
-from alphaproof.formalize.data_cleaning.pipeline import CleanResult, Timers
+from alphaproof.formalize.data_cleaning.pipeline import (
+        CleanResult,
+        Timers,
+        add_proof_rows,
+)
 from alphaproof.formalize.qwen3 import Qwen3, TensorParallelError
 
 
@@ -58,6 +62,70 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(outputs[0], 1)
         self.assertIsInstance(outputs[1], ValueError)
         self.assertEqual(outputs[2], 3)
+
+
+class ExistenceTheoremTests(unittest.TestCase):
+    def test_trivial_existence_theorems_are_failed(self) -> None:
+        records = [
+                {
+                        'id': 'trivial',
+                        'problem': 'What is the value of 1 + 1?',
+                        'question_type': 'math-word-problem',
+                },
+                {
+                        'id': 'nontrivial',
+                        'problem': 'Find an integer x such that x^2 = 4.',
+                        'question_type': 'math-word-problem',
+                },
+        ]
+        jobs = [
+                {
+                        'record_ix': index,
+                        'record': record,
+                        'problem': record['problem'],
+                        'answer': None,
+                        'suffix': 'part_0',
+                }
+                for index, record in enumerate(records)
+        ]
+        results = [CleanResult(), CleanResult()]
+
+        with patch(
+                'alphaproof.formalize.data_cleaning.pipeline.'
+                'proof_problems_without_answer',
+                return_value=[
+                        'Prove that there exists a value of 1 + 1.',
+                        'Prove that there exists an integer x such that x^2 = 4.',
+                ],
+        ):
+            with patch(
+                    'alphaproof.formalize.data_cleaning.pipeline.'
+                    'is_trivial_existence_theorem',
+                    return_value=[(True, 'YES'), (False, 'NO')],
+            ):
+                add_proof_rows(
+                        jobs,
+                        Qwen3(model_dir='/tmp/model'),
+                        results,
+                        Timers(),
+                )
+
+        self.assertEqual(
+                results[0].output_rows[0]['FAILED'],
+                'trivial_existence_theorem',
+        )
+        self.assertEqual(results[0].output_rows[0]['source_id'], 'trivial')
+        self.assertIsNone(results[0].output_rows[0]['answer'])
+        self.assertIsNone(results[1].output_rows[0]['FAILED'])
+        self.assertEqual(
+                results[0].boolean_outputs['is_trivial_existence_theorem'],
+                [True],
+        )
+        self.assertEqual(
+                results[1].boolean_outputs['is_trivial_existence_theorem'],
+                [False],
+        )
+
 
 class DataParallelMergeTests(unittest.TestCase):
     def test_strided_results_are_merged_in_original_order(self) -> None:
