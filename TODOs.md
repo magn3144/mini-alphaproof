@@ -1,3 +1,7 @@
+## AlphaProof implementation
+- [ ] Make rollout agents run in parallel.
+- [ ] CLI for training.
+
 ## Data cleaning / formalization
 - [X] Fix errors in data cleaning script.
 - [X] Test data cleaning script with timer and LLM otputs printed to see why it takes so long to execute.
@@ -12,7 +16,7 @@
 - [ ] Generate SFT dataset from finished lean proofs.
 - [X] Make formalization pipeline run on two A100 80GB GPUs.
 - [ ] Run formalization pipeline.
-- [ ] Figure out which licences the datasets / models have.
+- [X] Figure out which licences the datasets / models have.
 
 ## Training
 - [ ] Train on SFT dataset.
