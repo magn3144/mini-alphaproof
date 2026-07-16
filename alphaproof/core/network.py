@@ -1,4 +1,5 @@
 import typing
+from pathlib import Path
 from typing import Dict
 
 import torch
@@ -72,6 +73,11 @@ class Network(nn.Module):
     def params(self, params: Params):
         """Load a PyTorch checkpoint from shared storage."""
         self.load_state_dict(params)
+
+    def load_params(self, path: Path) -> None:
+        """Load network parameters saved by supervised fine-tuning."""
+        params = torch.load(path, map_location='cpu', weights_only=True)
+        self.params = typing.cast(Params, params)
 
     def _loss_fn(
         self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]

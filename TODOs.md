@@ -11,9 +11,9 @@
 - [X] Add JSON schema to model in data cleaning pipeline.
 - [X] Run a cleaning run.
 - [X] Give qwen a max batch size parameter to avoid memory problems.
-- [ ] Make it run on two A100s to achieve a much larger batch size.
+- [X] Make cleaning pipeline run on two A100s to achieve a much larger batch size.
 - [X] Check after the existence theorem has been created that it is not trivial.
-- [ ] Generate SFT dataset from finished lean proofs.
+- [X] Generate SFT dataset from finished lean proofs.
 - [X] Make formalization pipeline run on two A100 80GB GPUs.
 - [ ] Run formalization pipeline.
 - [X] Figure out which licences the datasets / models have.

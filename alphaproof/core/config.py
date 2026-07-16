@@ -29,12 +29,19 @@ class Config:
         tokenizer_model: str = DEFAULT_TOKENIZER_MODEL,
         dataset_path: str | Path = DEFAULT_THEOREMS_PATH,
         run_id: int | str = 0,
+        sft_run_dir: str | Path | None = None,
     ):
         """Populate acting, search, training, and matchmaker settings."""
         ### Acting
         self.environment_ctor = environment_ctor
-        self.tokenizer_model = tokenizer_model
         self.dataset_path = Path(dataset_path)
+        self.sft_run_dir = Path(sft_run_dir) if sft_run_dir is not None else None
+        if self.sft_run_dir is None:
+            self.tokenizer_model = tokenizer_model
+            self.initial_params_path = None
+        else:
+            self.tokenizer_model = str(self.sft_run_dir / 'model_source')
+            self.initial_params_path = self.sft_run_dir / 'network_params.pt'
         self.num_actors = num_actors
         self.num_games = num_games
         self.num_simulations = num_simulations

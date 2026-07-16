@@ -44,6 +44,8 @@ def alphaproof_train(config: Config) -> Network:
     matchmaker = Matchmaker(config)
 
     network = Network(config)
+    if config.initial_params_path is not None:
+        network.load_params(config.initial_params_path)
     storage.save_params(0, network.params)
 
     for _ in range(config.num_actors):
