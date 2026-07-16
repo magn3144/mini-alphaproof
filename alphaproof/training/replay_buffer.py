@@ -15,7 +15,8 @@ class ReplayBuffer:
         """Initialize replay limits from the configuration."""
         self.window_size = config.window_size
         self.batch_size = config.batch_size
-        self.sequence_length = config.sequence_length
+        self.max_state_length = config.max_state_length
+        self.max_action_length = config.max_action_length
         self.buffer = []
         self.tokenizer_model = config.tokenizer_model
         self.tokenizer = self._load_tokenizer()
@@ -40,15 +41,17 @@ class ReplayBuffer:
             raise ValueError('Cannot sample from an empty replay buffer.')
 
         observation, action, value = random.choice(self.buffer)
-        tokenized_observation = self.tokenize(observation)
-        tokenized_action = self.tokenize(action)
+        tokenized_observation = self.tokenize(
+            observation, self.max_state_length
+        )
+        tokenized_action = self.tokenize(action, self.max_action_length)
         return (tokenized_observation, tokenized_action, value)
 
-    def tokenize(self, input_value: Any) -> torch.Tensor:
+    def tokenize(self, input_value: Any, max_length: int) -> torch.Tensor:
         """Tokenize text with the CodeT5+ tokenizer."""
         encoded = self.tokenizer(
             str(input_value),
-            max_length=self.sequence_length,
+            max_length=max_length,
             padding='max_length',
             truncation=True,
             return_tensors='pt',

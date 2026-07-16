@@ -36,7 +36,8 @@ class Network(nn.Module):
 
         self.num_value_bins = config.num_value_bins
         self.value_weight = config.value_weight
-        self.sequence_length = config.sequence_length
+        self.max_state_length = config.max_state_length
+        self.max_action_length = config.max_action_length
         self.device: torch.device = torch.device(
             'cuda' if torch.cuda.is_available() else 'cpu'
         )
@@ -190,7 +191,7 @@ class Network(nn.Module):
         self.eval()
         encoded = self.tokenizer(
             observation,
-            max_length=self.sequence_length,
+            max_length=self.max_state_length,
             padding='max_length',
             truncation=True,
             return_tensors='pt',
@@ -207,7 +208,7 @@ class Network(nn.Module):
             generated = self.model.generate(
                 encoder_outputs=encoder_outputs,
                 attention_mask=attention_mask,
-                max_length=self.sequence_length,
+                max_new_tokens=self.max_action_length,
                 num_return_sequences=self.num_sampled_actions,
                 do_sample=True,
                 output_scores=True,

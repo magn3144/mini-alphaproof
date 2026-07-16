@@ -30,6 +30,8 @@ class Config:
         dataset_path: str | Path = DEFAULT_THEOREMS_PATH,
         run_id: int | str = 0,
         sft_run_dir: str | Path | None = None,
+        max_state_length: int = 640,
+        max_action_length: int = 128,
     ):
         """Populate acting, search, training, and matchmaker settings."""
         ### Acting
@@ -68,7 +70,8 @@ class Config:
         self.checkpoint_interval = int(1e3)
         self.window_size = int(1e6)
         self.batch_size = batch_size
-        self.sequence_length = 32
+        self.max_state_length = max_state_length
+        self.max_action_length = max_action_length
         self.lr = lr
         self.value_weight = 0.001
 

@@ -190,8 +190,9 @@ def make_network(args: argparse.Namespace, device: torch.device) -> Network:
         num_games=1,
         lr=args.learning_rate,
         tokenizer_model=str(args.model),
+        max_state_length=args.max_state_length,
+        max_action_length=args.max_action_length,
     )
-    config.sequence_length = args.max_state_length
     config.value_weight = args.value_weight
     tokenizer = RobertaTokenizer(
         vocab=str(args.model / 'vocab.json'),
