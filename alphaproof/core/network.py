@@ -47,6 +47,7 @@ class Network(nn.Module):
         self.value_head = nn.Linear(
             self.model.config.d_model,
             self.num_value_bins,
+            dtype=self.model.dtype,
         )
 
         self.value_bins: torch.Tensor

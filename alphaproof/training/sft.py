@@ -208,7 +208,7 @@ def make_network(args: argparse.Namespace, device: torch.device) -> Network:
     with patch.object(AutoTokenizer, 'from_pretrained', return_value=tokenizer):
         network = Network(config)
     network.device = device
-    network.float().to(device)
+    network.to(device=device, dtype=torch.bfloat16)
     return network
 
 
@@ -223,9 +223,13 @@ def batch_losses(
     actions = actions.to(network.device)
     value_targets = value_targets.to(network.device)
     output = network(observations, actions)
-    value_loss = network.value_loss(output.value_logits, value_targets)
-    total_loss = output.policy_loss + value_weight * value_loss
-    return total_loss, output.policy_loss, value_loss, output
+    policy_loss = output.policy_loss.float()
+    value_loss = network.value_loss(
+        output.value_logits.float(),
+        value_targets.float(),
+    )
+    total_loss = policy_loss + value_weight * value_loss
+    return total_loss, policy_loss, value_loss, output
 
 
 def train_epoch(
@@ -298,9 +302,12 @@ def validate(
                 token_correct = predictions.eq(actions) | actions.eq(pad_token_id)
                 correct = token_correct.all(dim=-1)
 
-            value_probabilities = torch.softmax(output.value_logits, dim=-1)
+            value_probabilities = torch.softmax(
+                output.value_logits.float(),
+                dim=-1,
+            )
             predicted_values = (
-                value_probabilities * network.value_bins
+                value_probabilities * network.value_bins.float()
             ).sum(dim=-1)
             batch_size = actions.shape[0]
             examples_seen += batch_size
@@ -375,7 +382,7 @@ def save_network_source(
         (base_model_dir / 'config.json').read_text(encoding='utf-8')
     )
     config.pop('torch_dtype', None)
-    config['dtype'] = 'float32'
+    config['dtype'] = 'bfloat16'
     (model_source_dir / 'config.json').write_text(
         json.dumps(config, indent=2) + '\n',
         encoding='utf-8',
