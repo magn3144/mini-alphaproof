@@ -14,23 +14,16 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase, RobertaTokenize
 
 from alphaproof.core.config import Config
 from alphaproof.core.network import Network
+from alphaproof.core.paths import DATASET_DIR, MODELS_DIR, RUNS_DIR
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRAIN_INPUT = (
-    PROJECT_ROOT
-    / 'data'
-    / 'dataset'
-    / 'leantree_mathlib_state_action_pairs.train.jsonl'
+    DATASET_DIR / 'leantree_mathlib_state_action_pairs.train.jsonl'
 )
 DEFAULT_VALIDATION_INPUT = (
-    PROJECT_ROOT
-    / 'data'
-    / 'dataset'
-    / 'leantree_mathlib_state_action_pairs.validation.jsonl'
+    DATASET_DIR / 'leantree_mathlib_state_action_pairs.validation.jsonl'
 )
-DEFAULT_MODEL_PATH = PROJECT_ROOT / 'models' / 'Salesforce--codet5p-220m'
-RUNS_DIR = PROJECT_ROOT / 'data' / 'runs'
+DEFAULT_MODEL_PATH = MODELS_DIR / 'Salesforce--codet5p-220m'
 
 
 @dataclass(frozen=True)

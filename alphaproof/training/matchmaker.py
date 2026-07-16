@@ -6,11 +6,9 @@ from pathlib import Path
 from alphaproof.core.config import Config
 from alphaproof.core.environment import Theorem
 from alphaproof.core.game import Game
+from alphaproof.core.paths import RUNS_DIR
 
 
-DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
-DEFAULT_DATASET_PATH = DATA_DIR / 'dataset' / 'test_theorems.jsonl'
-RUNS_DIR = DATA_DIR / 'runs'
 MATCHMAKER_STATS_FILE = 'matchmaker_stats.json'
 
 
@@ -53,16 +51,12 @@ class Matchmaker:
                     return config.mm_proved_weight
             return 1.0
 
-    def __init__(
-        self,
-        config: Config,
-        dataset_path: str | Path = DEFAULT_DATASET_PATH,
-    ):
+    def __init__(self, config: Config):
         """Initialize theorem statistics from the backing store."""
         self.config = config
         self.run_dir = RUNS_DIR / str(config.run_id)
         self.stats_path = self.run_dir / MATCHMAKER_STATS_FILE
-        self.theorem_stats = self._load_theorem_stats(Path(dataset_path))
+        self.theorem_stats = self._load_theorem_stats(config.dataset_path)
         self._save_theorem_stats()
 
     def _load_theorem_stats(self, dataset_path: Path) -> dict[Theorem, Stats]:
