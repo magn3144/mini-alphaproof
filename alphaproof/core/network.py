@@ -233,7 +233,16 @@ class Network(nn.Module):
                 generated.scores,
                 normalize_logits=True,
             )
-            logprobs = transition_scores.sum(dim=-1).tolist()
+            generated_tokens = generated.sequences[
+                :, -transition_scores.shape[-1] :
+            ]
+            pad_token_id = typing.cast(int, self.model.config.pad_token_id)
+            score_mask = generated_tokens.ne(pad_token_id)
+            logprobs = (
+                transition_scores.masked_fill(~score_mask, 0.0)
+                .sum(dim=-1)
+                .tolist()
+            )
 
         actions = self.tokenizer.batch_decode(
             generated.sequences,

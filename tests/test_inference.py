@@ -37,6 +37,8 @@ class FakeTokenizer:
 class FakeModel:
     """Expand encoder outputs like Transformers generation does."""
 
+    config = SimpleNamespace(pad_token_id=0)
+
     def get_encoder(self):
         def encode(**kwargs):
             del kwargs
@@ -50,13 +52,23 @@ class FakeModel:
             8, 1, 1
         )
         return SimpleNamespace(
-            sequences=torch.ones(8, 2, dtype=torch.long),
-            scores=(torch.zeros(8, 2),),
+            sequences=torch.tensor(
+                [[0, 4, 2, 0]] + [[0, 4, 5, 2]] * 7,
+                dtype=torch.long,
+            ),
+            scores=(
+                torch.zeros(8, 2),
+                torch.zeros(8, 2),
+                torch.zeros(8, 2),
+            ),
         )
 
     def compute_transition_scores(self, sequences, scores, **kwargs):
         del scores, kwargs
-        return torch.zeros(sequences.shape[0], 1)
+        transition_scores = torch.tensor(
+            [[-1.0, -2.0, float('-inf')]] + [[-1.0, -2.0, -3.0]] * 7
+        )
+        return transition_scores[:sequences.shape[0]]
 
 
 class FakeEnvironment:
@@ -109,6 +121,7 @@ class NetworkSamplingTest(unittest.TestCase):
 
         self.assertIsInstance(output.value, float)
         self.assertEqual(len(output.action_logprobs), 8)
+        self.assertEqual(output.action_logprobs['action_0'], -3.0)
 
 
 class InferenceTest(unittest.TestCase):

@@ -6,10 +6,12 @@ from alphaproof.core.paths import (
     DEFAULT_THEOREMS_PATH,
     LEAN_PROJECT_DIR,
     MODELS_DIR,
+    RUNS_DIR,
 )
 from leantree import LeanProject
 
 
+DEFAULT_MODEL_PATH = RUNS_DIR / 'sft_codet5p_220m_v100_32gb'
 DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
 
 

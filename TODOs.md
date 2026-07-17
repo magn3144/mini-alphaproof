@@ -20,8 +20,8 @@
 - [X] Figure out which licences the datasets / models have.
 
 ## Training
-- [ ] Train on SFT dataset.
+- [X] Train on SFT dataset.
 - [ ] Train on formalized theorems using AlphaProof.
 
 ## Interactive Environment
-- [ ] Visualize agent AND-OR search tree.
+- [X] Visualize agent AND-OR search tree.

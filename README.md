@@ -14,7 +14,6 @@ Run inference from either an SFT run or an RL run:
 
 ```bash
 python -m alphaproof.inference.infer \
-  --run-dir data/runs/sft_mps_smoke \
   --theorem 'theorem alphaproof_example : True := by sorry' \
   --num-simulations 800
 ```
@@ -22,3 +21,24 @@ python -m alphaproof.inference.infer \
 Use `--theorem-file theorem.lean` instead of `--theorem` to read the theorem
 from a file. The command prints a complete Lean declaration when it finds and
 verifies a proof, and exits with status 1 when no verified proof is found.
+
+## Interactive environment
+
+Start the backend with the model used by the Agent tab:
+
+```bash
+python -m alphaproof.inference.interactive_env \
+  --num-simulations 800 \
+  --num-sampled-actions 3
+```
+
+Then start the React client in another terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+The Manual tab supports saved tactic branches and full AND-OR proof trees. The
+Agent tab runs the normal MCTS search and polls the same tree view while the
+search is active.
