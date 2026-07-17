@@ -5,7 +5,7 @@
 #BSUB -R "span[hosts=1]"
 #BSUB -R "select[gpu80gb]"
 #BSUB -R "rusage[mem=12GB]"
-#BSUB -gpu "num=2:mode=exclusive_process"
+#BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 #BSUB -o scripts/batch/logs/data_cleaning_qwen27b_%J.out
 #BSUB -e scripts/batch/logs/data_cleaning_qwen27b_%J.err
@@ -25,7 +25,6 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ROWS_TO_CLEAN="${ROWS_TO_CLEAN:-100000}"
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MAX_MODEL_BATCH_SIZE="${MAX_MODEL_BATCH_SIZE:-256}"
-PARALLELISM="${PARALLELISM:-data}"
 SEED="${SEED:-0}"
 INPUT_PATH="${INPUT_PATH:-data/dataset/numina_math_1_5_filtered.jsonl}"
 OUTPUT_PATH="${OUTPUT_PATH:-data/dataset/numina_math_1_5_cleaned.jsonl}"
@@ -47,17 +46,12 @@ set -- -m alphaproof.formalize.data_cleaning.data_cleaning \
     --output-path "${OUTPUT_PATH}" \
     --batch-size "${BATCH_SIZE}" \
     --max-model-batch-size "${MAX_MODEL_BATCH_SIZE}" \
-    --parallelism "${PARALLELISM}" \
+    --parallelism none \
     --seed "${SEED}" \
     --model qwen3.6-27b \
     --device cuda \
     --torch-dtype auto \
     --summary
 
-if [ "${PARALLELISM}" = tensor ] || [ "${PARALLELISM}" = data ]; then
-    export OMP_NUM_THREADS=4
-    uv run --no-sync torchrun --standalone --nproc-per-node=2 "$@"
-else
-    export OMP_NUM_THREADS=8
-    uv run --no-sync python "$@"
-fi
+export OMP_NUM_THREADS=8
+uv run --no-sync python "$@"
