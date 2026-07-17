@@ -1,6 +1,7 @@
 ## AlphaProof implementation
 - [ ] Make rollout agents run in parallel.
-- [ ] CLI for training.
+- [X] CLI for training.
+- [X] CLI for inference.
 
 ## Data cleaning / formalization
 - [X] Fix errors in data cleaning script.
@@ -21,3 +22,6 @@
 ## Training
 - [ ] Train on SFT dataset.
 - [ ] Train on formalized theorems using AlphaProof.
+
+## Interactive Environment
+- [ ] Visualize agent AND-OR search tree.

@@ -205,7 +205,16 @@ class Network(nn.Module):
                 attention_mask=attention_mask,
                 return_dict=True,
             )
-            generated = self.model.generate(
+            pooled_state = self._mean_pool_encoder_state(
+                encoder_outputs.last_hidden_state,
+                attention_mask,
+            )
+            value_logits = self.value_head(pooled_state)
+            value_probs = torch.softmax(value_logits, dim=-1)
+            value = (value_probs * self.value_bins).sum(dim=-1).item()
+
+            generation_model = typing.cast(typing.Any, self.model)
+            generated = generation_model.generate(
                 encoder_outputs=encoder_outputs,
                 attention_mask=attention_mask,
                 max_new_tokens=self.max_action_length,
@@ -218,16 +227,8 @@ class Network(nn.Module):
             if generated.scores is None:
                 raise ValueError('Expected generation output to include scores.')
 
-            pooled_state = self._mean_pool_encoder_state(
-                encoder_outputs.last_hidden_state,
-                attention_mask,
-            )
-            value_logits = self.value_head(pooled_state)
-            value_probs = torch.softmax(value_logits, dim=-1)
-            value = (value_probs * self.value_bins).sum(dim=-1).item()
-
             # The summed logprobs are calcualted and later used in the PUCT formula
-            transition_scores = self.model.compute_transition_scores(
+            transition_scores = generation_model.compute_transition_scores(
                 generated.sequences,
                 generated.scores,
                 normalize_logits=True,
