@@ -1,4 +1,5 @@
 import math
+from collections.abc import Callable
 from typing import Dict, List
 
 from alphaproof.core.config import Config
@@ -19,6 +20,7 @@ def run_actor(
         replay_buffer: ReplayBuffer,
         matchmaker: Matchmaker,
         num_games: int,
+        on_game: Callable[[Game], None] | None = None,
 ):
     """Generate solved games from the latest checkpoint."""
     network = Network(config)
@@ -28,6 +30,8 @@ def run_actor(
         if game.root.is_optimal:
             replay_buffer.save_game(game)
         matchmaker.send_game(game)
+        if on_game is not None:
+            on_game(game)
 
 
 # Each game is produced by starting from the initial Lean state, and executing

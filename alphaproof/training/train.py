@@ -1,63 +1,393 @@
+import argparse
+import json
+import uuid
+from collections import deque
+from pathlib import Path
+from typing import Any
+
+import wandb
+
 from alphaproof.core.actors import run_actor
 from alphaproof.core.config import Config
-from alphaproof.training.matchmaker import Matchmaker
+from alphaproof.core.game import Game
 from alphaproof.core.network import Network
+from alphaproof.core.paths import RUNS_DIR
+from alphaproof.training.matchmaker import Matchmaker
 from alphaproof.training.replay_buffer import ReplayBuffer
 from alphaproof.training.shared_storage import SharedStorage
 
 
+CONFIG_FILE = 'config.json'
+RESULTS_FILE = 'results.jsonl'
+REPLAY_FILE = 'replay_buffer.jsonl'
+
+
+class RunLogger:
+    """Persist game results and isolate all Weights & Biases logging."""
+
+    def __init__(
+        self,
+        run_dir: Path,
+        reward_window: int,
+        wandb_run: Any,
+    ):
+        self.results_path = run_dir / RESULTS_FILE
+        self.results_path.touch(exist_ok=True)
+        self.reward_window = reward_window
+        self.wandb_run = wandb_run
+        successes, rewards = self._load_results()
+        self.games_completed = len(successes)
+        self.recent_successes = deque(
+            successes[-reward_window:], maxlen=reward_window
+        )
+        self.recent_rewards = deque(rewards[-reward_window:], maxlen=reward_window)
+
+    def log_game(self, game: Game, replay_size: int) -> None:
+        """Persist and log one actor result."""
+        success = int(game.root.is_optimal)
+        reward = int(game.root.value_target) if success else None
+        self.recent_successes.append(success)
+        rolling_success_rate = (
+            sum(self.recent_successes) / len(self.recent_successes)
+        )
+        if reward is not None:
+            self.recent_rewards.append(reward)
+        rolling_reward = (
+            sum(self.recent_rewards) / len(self.recent_rewards)
+            if self.recent_rewards
+            else None
+        )
+        self.games_completed += 1
+        record = {
+            'game': self.games_completed,
+            'theorem': game.theorem,
+            'disprove': game.disprove,
+            'success': success,
+            'episode_reward': reward,
+            'rolling_success_rate': rolling_success_rate,
+            'rolling_average_reward': rolling_reward,
+            'num_simulations': game.num_simulations,
+            'replay_size': replay_size,
+        }
+        with self.results_path.open('a', encoding='utf-8') as results_file:
+            results_file.write(json.dumps(record) + '\n')
+        metrics = {
+            'actor/game': self.games_completed,
+            'actor/success': success,
+            'actor/rolling_success_rate': rolling_success_rate,
+            'actor/num_simulations': game.num_simulations,
+            'replay/train_size': replay_size,
+        }
+        if reward is not None:
+            metrics['actor/episode_reward'] = reward
+        if rolling_reward is not None:
+            metrics['actor/rolling_average_reward'] = rolling_reward
+        self.wandb_run.log(metrics)
+        message = (
+            f'Game {self.games_completed}: success {success}, '
+            f'rolling success rate {rolling_success_rate:.3f}'
+        )
+        if reward is not None:
+            message += f', reward {reward}'
+        print(message, flush=True)
+
+    def log_training(
+        self,
+        step: int,
+        train_loss: float,
+        validation_loss: float | None,
+        replay_size: int,
+    ) -> None:
+        """Log learner metrics."""
+        metrics = {
+            'learner/step': step,
+            'train/loss': train_loss,
+            'replay/train_size': replay_size,
+        }
+        if validation_loss is not None:
+            metrics['validation/replay_loss'] = validation_loss
+        self.wandb_run.log(metrics)
+        message = f'Step {step}: train loss {train_loss:.4f}'
+        if validation_loss is not None:
+            message += f', replay validation loss {validation_loss:.4f}'
+        print(message, flush=True)
+
+    def finish(self) -> None:
+        """Finish the W&B run."""
+        self.wandb_run.finish()
+
+    def _load_results(self) -> tuple[list[int], list[int]]:
+        """Load completed successes and solved rewards when resuming."""
+        if not self.results_path.exists():
+            return [], []
+        successes = []
+        rewards = []
+        with self.results_path.open(encoding='utf-8') as results_file:
+            for line in results_file:
+                record = json.loads(line)
+                successes.append(int(record['success']))
+                if record['episode_reward'] is not None:
+                    rewards.append(int(record['episode_reward']))
+        return successes, rewards
+
+
 def train_network(
     config: Config,
+    network: Network,
     storage: SharedStorage,
     replay_buffer: ReplayBuffer,
-):
+    start_step: int,
+    logger: RunLogger,
+) -> None:
     """Train the network from replay and checkpoint parameters."""
-    network = Network(config)
-    network.params = storage.latest_params()
-
     if len(replay_buffer) == 0:
         print('Warning: replay buffer is empty; skipping network training.')
         return
 
-    for i in range(config.training_steps):
-        if i % config.checkpoint_interval == 0:
-            storage.save_params(i, network.params)
-        batch = replay_buffer.sample_batch()
-        network.update(batch)
-    storage.save_params(config.training_steps, network.params)
+    validation_batch = replay_buffer.validation_batch(
+        config.validation_batch_size
+    )
+    for step in range(start_step + 1, config.training_steps + 1):
+        train_loss = network.update(replay_buffer.sample_batch())
+        validation_loss = None
+        if validation_batch and step % config.validation_interval == 0:
+            validation_loss = network.evaluate(validation_batch)
+        if step % config.log_interval == 0 or validation_loss is not None:
+            logger.log_training(
+                step,
+                train_loss,
+                validation_loss,
+                len(replay_buffer),
+            )
+        if step % config.checkpoint_interval == 0:
+            storage.save_checkpoint(step, network)
+
+    if config.training_steps % config.checkpoint_interval != 0:
+        storage.save_checkpoint(config.training_steps, network)
 
 
-def launch_job(f, *args):
+def launch_job(function, *args):
     """Launch a worker job in the pseudocode runtime."""
-    f(*args)
+    return function(*args)
 
 
-# AlphaProof training is split into two independent parts: A learner which
-# updates the network, and actors which play games to generate data.
-# These two parts only communicate by transferring the latest network checkpoint
-# from the learner to the actor, and the finished games from the actor
-# to the learner.
-def alphaproof_train(config: Config) -> Network:
-    """Coordinate actor jobs and learner updates for AlphaProof training."""
-    storage = SharedStorage()
-    replay_buffer = ReplayBuffer(config)
+def alphaproof_train(
+    config: Config,
+    run_dir: Path,
+    resume: bool,
+    logger: RunLogger,
+) -> Network:
+    """Coordinate resumable actor jobs and learner updates."""
+    storage = SharedStorage(run_dir)
+    replay_buffer = ReplayBuffer(config, run_dir / REPLAY_FILE)
     matchmaker = Matchmaker(config)
-
     network = Network(config)
-    if config.initial_params_path is not None:
+
+    if resume:
+        start_step = storage.load_latest_checkpoint(network)
+    else:
+        if config.initial_params_path is None:
+            raise ValueError('An SFT run is required for a new RL run.')
         network.load_params(config.initial_params_path)
-    storage.save_params(0, network.params)
+        start_step = 0
+        storage.save_checkpoint(start_step, network)
 
-    for _ in range(config.num_actors):
+    total_games = config.num_actors * config.num_games
+    remaining_games = total_games - logger.games_completed
+    while remaining_games > 0:
+        games = min(config.num_games, remaining_games)
         launch_job(
-                run_actor,
-                config,
-                storage,
-                replay_buffer,
-                matchmaker,
-                config.num_games,
+            run_actor,
+            config,
+            storage,
+            replay_buffer,
+            matchmaker,
+            games,
+            lambda game: logger.log_game(game, len(replay_buffer)),
         )
+        remaining_games -= games
 
-    train_network(config, storage, replay_buffer)
+    train_network(
+        config,
+        network,
+        storage,
+        replay_buffer,
+        start_step,
+        logger,
+    )
+    return network
 
-    return storage.latest_params()
+
+def serializable_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Convert CLI paths to JSON-compatible strings."""
+    return {
+        name: str(value) if isinstance(value, Path) else value
+        for name, value in vars(args).items()
+    }
+
+
+def serializable_config(config: Config) -> dict[str, Any]:
+    """Convert the full AlphaProof configuration to JSON values."""
+    return {
+        name: str(value) if isinstance(value, Path) else value
+        for name, value in vars(config).items()
+        if name != 'environment_ctor'
+    }
+
+
+def make_config(
+    args: argparse.Namespace,
+    saved_config: dict[str, Any] | None = None,
+) -> Config:
+    """Build the AlphaProof configuration from CLI arguments."""
+    config = Config(
+        num_simulations=args.num_simulations,
+        batch_size=args.batch_size,
+        num_games=args.num_games,
+        lr=args.learning_rate,
+        run_id=args.run_name,
+        training_steps=args.training_steps,
+        value_weight=args.value_weight,
+    )
+    if saved_config is not None:
+        for name, value in saved_config.items():
+            if name in ('dataset_path', 'sft_run_dir', 'initial_params_path'):
+                value = Path(value) if value is not None else None
+            setattr(config, name, value)
+    return config
+
+
+def initialize_wandb(
+    args: argparse.Namespace,
+    config: Config,
+) -> Any:
+    """Initialize W&B with the run's saved settings."""
+    wandb_run: Any = wandb.init(
+        project=config.wandb_project,
+        entity=config.wandb_entity,
+        name=args.wandb_name or args.run_name,
+        id=args.wandb_run_id,
+        tags=config.wandb_tags,
+        mode=args.wandb_mode,
+        resume='allow' if args.resume else 'never',
+        config=serializable_config(config),
+    )
+    wandb_run.define_metric('actor/game')
+    wandb_run.define_metric('actor/*', step_metric='actor/game')
+    wandb_run.define_metric('learner/step')
+    wandb_run.define_metric('train/*', step_metric='learner/step')
+    wandb_run.define_metric('validation/*', step_metric='learner/step')
+    return wandb_run
+
+
+def positive_int(value: str) -> int:
+    """Parse a positive integer."""
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError('value must be positive')
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse RL training arguments."""
+    parser = argparse.ArgumentParser(description='Train AlphaProof with RL.')
+    parser.add_argument('run_name', help='Directory name under data/runs.')
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--num-simulations', type=positive_int, default=800)
+    parser.add_argument('--num-games', type=positive_int, default=1)
+    parser.add_argument('--batch-size', type=positive_int, default=32)
+    parser.add_argument('--learning-rate', type=float, default=1e-5)
+    parser.add_argument('--training-steps', type=positive_int, default=1000000)
+    parser.add_argument('--value-weight', type=float, default=0.001)
+    parser.add_argument('--wandb-name')
+    parser.add_argument(
+        '--wandb-mode',
+        choices=('online', 'offline', 'disabled'),
+        default='disabled',
+    )
+    return parser.parse_args()
+
+
+def prepare_run(
+    args: argparse.Namespace,
+) -> tuple[argparse.Namespace, Path, dict[str, Any] | None]:
+    """Create a new run or restore its saved CLI configuration."""
+    if Path(args.run_name).name != args.run_name:
+        raise ValueError('run_name must be a single directory name.')
+    run_dir = RUNS_DIR / args.run_name
+    config_path = run_dir / CONFIG_FILE
+
+    if args.resume:
+        if not config_path.is_file():
+            raise FileNotFoundError(f'Run configuration does not exist: {config_path}')
+        with config_path.open(encoding='utf-8') as config_file:
+            saved = json.load(config_file)
+        saved_args = saved['args']
+        saved_args['resume'] = True
+        return argparse.Namespace(**saved_args), run_dir, saved['config']
+
+    if run_dir.exists():
+        raise FileExistsError(f'Run already exists: {run_dir}')
+    args.wandb_run_id = uuid.uuid4().hex
+    config = make_config(args)
+    if config.sft_run_dir is None:
+        raise ValueError('Set sft_run_dir in Config before starting RL.')
+    if not config.dataset_path.is_file():
+        raise FileNotFoundError(
+            f'Theorem dataset does not exist: {config.dataset_path}'
+        )
+    if not (config.sft_run_dir / 'model_source').is_dir():
+        raise FileNotFoundError('SFT model_source directory does not exist.')
+    if not (config.sft_run_dir / 'network_params.pt').is_file():
+        raise FileNotFoundError('SFT network_params.pt does not exist.')
+    if args.learning_rate <= 0:
+        raise ValueError('--learning-rate must be positive.')
+    if args.value_weight < 0:
+        raise ValueError('--value-weight cannot be negative.')
+
+    run_dir.mkdir(parents=True)
+    return args, run_dir, None
+
+
+def save_run_config(
+    run_dir: Path,
+    args: argparse.Namespace,
+    config: Config,
+) -> None:
+    """Save CLI and complete algorithm configuration for a new run."""
+    with (run_dir / CONFIG_FILE).open('w', encoding='utf-8') as config_file:
+        json.dump(
+            {
+                'args': serializable_args(args),
+                'config': serializable_config(config),
+            },
+            config_file,
+            indent=2,
+        )
+        config_file.write('\n')
+
+
+def main() -> None:
+    """Run or resume AlphaProof reinforcement learning."""
+    args, run_dir, saved_config = prepare_run(parse_args())
+    config = make_config(args, saved_config)
+    if not args.resume:
+        save_run_config(run_dir, args, config)
+    logger = RunLogger(
+        run_dir,
+        config.reward_window,
+        initialize_wandb(args, config),
+    )
+    try:
+        alphaproof_train(
+            config,
+            run_dir,
+            args.resume,
+            logger,
+        )
+    finally:
+        logger.finish()
+
+
+if __name__ == '__main__':
+    main()

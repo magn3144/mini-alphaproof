@@ -261,6 +261,14 @@ class Network(nn.Module):
         self.optimizer.step()
         return loss.detach().item()
 
+    def evaluate(
+        self, batch: list[tuple[torch.Tensor, torch.Tensor, float]]
+    ) -> float:
+        """Evaluate the combined policy and value loss."""
+        self.eval()
+        with torch.no_grad():
+            return self._loss_fn(batch).item()
+
     def _ensure_batch(self, tokens: torch.Tensor) -> torch.Tensor:
         """Add a batch dimension to a single token sequence."""
         if tokens.dim() == 1:
