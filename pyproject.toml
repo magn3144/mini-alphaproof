@@ -12,7 +12,7 @@ dependencies = [
     "lm-format-enforcer>=0.11.0",
     "matplotlib>=3.10.0",
     "pandas>=3.0.0",
-    "torch>=2.12.1",
+    "torch==2.12.1",
     "transformers",
 ]
 
@@ -27,6 +27,12 @@ lean-tracing = [
 [tool.uv.sources]
 leantree = { path = "vendor/leantree", editable = true }
 transformers = { git = "https://github.com/huggingface/transformers.git" }
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [tool.uv.extra-build-dependencies]
 causal-conv1d = [

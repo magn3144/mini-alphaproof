@@ -1,6 +1,7 @@
 """Supervised fine-tuning of AlphaProof's CodeT5 policy and value network."""
 
 import argparse
+import gc
 import json
 import random
 from dataclasses import dataclass
@@ -24,6 +25,11 @@ DEFAULT_VALIDATION_INPUT = (
     DATASET_DIR / 'leantree_mathlib_state_action_pairs.validation.jsonl'
 )
 DEFAULT_MODEL_PATH = MODELS_DIR / 'Salesforce--codet5p-220m'
+TORCH_DTYPES = {
+    'float32': torch.float32,
+    'float16': torch.float16,
+    'bfloat16': torch.bfloat16,
+}
 
 
 @dataclass(frozen=True)
@@ -202,7 +208,7 @@ def make_network(args: argparse.Namespace, device: torch.device) -> Network:
     with patch.object(AutoTokenizer, 'from_pretrained', return_value=tokenizer):
         network = Network(config)
     network.device = device
-    network.to(device=device, dtype=torch.bfloat16)
+    network.to(device=device, dtype=TORCH_DTYPES[args.dtype])
     return network
 
 
@@ -226,6 +232,36 @@ def batch_losses(
     return total_loss, policy_loss, value_loss, output
 
 
+def clear_oom_memory(network: Network) -> None:
+    """Release gradients and unused CUDA memory after an OOM."""
+    network.optimizer.zero_grad(set_to_none=True)
+    gc.collect()
+    if network.device.type == 'cuda':
+        torch.cuda.empty_cache()
+
+
+def train_batch(
+    network: Network,
+    batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    args: argparse.Namespace,
+) -> tuple[float, float, float]:
+    """Apply one optimizer update and return detached component losses."""
+    network.optimizer.zero_grad(set_to_none=True)
+    loss, policy_loss, value_loss, _ = batch_losses(
+        network,
+        batch,
+        args.value_weight,
+    )
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(network.parameters(), args.max_grad_norm)
+    network.optimizer.step()
+    return (
+        loss.detach().item(),
+        policy_loss.detach().item(),
+        value_loss.detach().item(),
+    )
+
+
 def train_epoch(
     network: Network,
     data_loader: DataLoader[Any],
@@ -238,21 +274,37 @@ def train_epoch(
     total_policy_loss = 0.0
     total_value_loss = 0.0
     examples_seen = 0
+    oom_batches = 0
 
     for step, batch in enumerate(data_loader, start=1):
-        loss, policy_loss, value_loss, _ = batch_losses(
-            network, batch, args.value_weight
-        )
-        network.optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(network.parameters(), args.max_grad_norm)
-        network.optimizer.step()
-
         batch_size = batch[0].shape[0]
+        batch_metrics = None
+        oom_message = ''
+        try:
+            batch_metrics = train_batch(
+                network,
+                batch,
+                args,
+            )
+        except torch.OutOfMemoryError as error:
+            oom_message = str(error)
+
+        if batch_metrics is None:
+            oom_batches += 1
+            clear_oom_memory(network)
+            print(
+                f'WARNING: OOM in training epoch {epoch}, step {step}/'
+                f'{len(data_loader)}; skipped {batch_size} examples and cleared '
+                f'the CUDA cache. {oom_message}',
+                flush=True,
+            )
+            continue
+
+        batch_loss, batch_policy_loss, batch_value_loss = batch_metrics
         examples_seen += batch_size
-        total_loss += loss.detach().item() * batch_size
-        total_policy_loss += policy_loss.detach().item() * batch_size
-        total_value_loss += value_loss.detach().item() * batch_size
+        total_loss += batch_loss * batch_size
+        total_policy_loss += batch_policy_loss * batch_size
+        total_value_loss += batch_value_loss * batch_size
         if step % args.log_every == 0:
             print(
                 f'Epoch {epoch}/{args.epochs}, step {step}/{len(data_loader)}, '
@@ -260,11 +312,59 @@ def train_epoch(
                 flush=True,
             )
 
+    if oom_batches:
+        print(
+            f'Epoch {epoch}: skipped {oom_batches} training batches due to OOM.',
+            flush=True,
+        )
     return {
-        'loss': total_loss / examples_seen,
-        'policy_loss': total_policy_loss / examples_seen,
-        'value_loss': total_value_loss / examples_seen,
+        'loss': total_loss / examples_seen if examples_seen else float('nan'),
+        'policy_loss': (
+            total_policy_loss / examples_seen if examples_seen else float('nan')
+        ),
+        'value_loss': (
+            total_value_loss / examples_seen if examples_seen else float('nan')
+        ),
+        'oom_batches': float(oom_batches),
     }
+
+
+def validation_batch_metrics(
+    network: Network,
+    batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    value_weight: float,
+    pad_token_id: int | None,
+) -> tuple[float, float, float, float, int]:
+    """Evaluate one validation batch and return detached metric totals."""
+    loss, policy_loss, value_loss, output = batch_losses(
+        network,
+        batch,
+        value_weight,
+    )
+    actions = batch[1].to(network.device)
+    value_targets = batch[2].to(network.device)
+    predictions = output.policy_logits.argmax(dim=-1)
+    if pad_token_id is None:
+        correct = predictions.eq(actions).all(dim=-1)
+    else:
+        token_correct = predictions.eq(actions) | actions.eq(pad_token_id)
+        correct = token_correct.all(dim=-1)
+
+    value_probabilities = torch.softmax(
+        output.value_logits.float(),
+        dim=-1,
+    )
+    predicted_values = (
+        value_probabilities * network.value_bins.float()
+    ).sum(dim=-1)
+    value_error = torch.abs(predicted_values - value_targets).sum().item()
+    return (
+        loss.item(),
+        policy_loss.item(),
+        value_loss.item(),
+        value_error,
+        int(correct.sum().item()),
+    )
 
 
 def validate(
@@ -280,45 +380,69 @@ def validate(
     total_value_error = 0.0
     exact_tactics = 0
     examples_seen = 0
+    oom_batches = 0
     pad_token_id = network.model.config.pad_token_id
 
     with torch.no_grad():
-        for batch in data_loader:
-            loss, policy_loss, value_loss, output = batch_losses(
-                network, batch, value_weight
-            )
-            actions = batch[1].to(network.device)
-            value_targets = batch[2].to(network.device)
-            predictions = output.policy_logits.argmax(dim=-1)
-            if pad_token_id is None:
-                correct = predictions.eq(actions).all(dim=-1)
-            else:
-                token_correct = predictions.eq(actions) | actions.eq(pad_token_id)
-                correct = token_correct.all(dim=-1)
+        for step, batch in enumerate(data_loader, start=1):
+            batch_size = batch[0].shape[0]
+            batch_metrics = None
+            oom_message = ''
+            try:
+                batch_metrics = validation_batch_metrics(
+                    network,
+                    batch,
+                    value_weight,
+                    pad_token_id,
+                )
+            except torch.OutOfMemoryError as error:
+                oom_message = str(error)
 
-            value_probabilities = torch.softmax(
-                output.value_logits.float(),
-                dim=-1,
-            )
-            predicted_values = (
-                value_probabilities * network.value_bins.float()
-            ).sum(dim=-1)
-            batch_size = actions.shape[0]
+            if batch_metrics is None:
+                oom_batches += 1
+                clear_oom_memory(network)
+                print(
+                    f'WARNING: OOM in validation step {step}/{len(data_loader)}; '
+                    f'skipped {batch_size} examples and cleared the CUDA cache. '
+                    f'{oom_message}',
+                    flush=True,
+                )
+                continue
+
+            (
+                batch_loss,
+                batch_policy_loss,
+                batch_value_loss,
+                batch_value_error,
+                batch_exact_tactics,
+            ) = batch_metrics
             examples_seen += batch_size
-            exact_tactics += int(correct.sum().item())
-            total_value_error += (
-                torch.abs(predicted_values - value_targets).sum().item()
-            )
-            total_loss += loss.item() * batch_size
-            total_policy_loss += policy_loss.item() * batch_size
-            total_value_loss += value_loss.item() * batch_size
+            exact_tactics += batch_exact_tactics
+            total_value_error += batch_value_error
+            total_loss += batch_loss * batch_size
+            total_policy_loss += batch_policy_loss * batch_size
+            total_value_loss += batch_value_loss * batch_size
 
+    if oom_batches:
+        print(
+            f'Validation: skipped {oom_batches} batches due to OOM.',
+            flush=True,
+        )
     return {
-        'loss': total_loss / examples_seen,
-        'policy_loss': total_policy_loss / examples_seen,
-        'value_loss': total_value_loss / examples_seen,
-        'teacher_forced_tactic_accuracy': exact_tactics / examples_seen,
-        'value_mae': total_value_error / examples_seen,
+        'loss': total_loss / examples_seen if examples_seen else float('nan'),
+        'policy_loss': (
+            total_policy_loss / examples_seen if examples_seen else float('nan')
+        ),
+        'value_loss': (
+            total_value_loss / examples_seen if examples_seen else float('nan')
+        ),
+        'teacher_forced_tactic_accuracy': (
+            exact_tactics / examples_seen if examples_seen else float('nan')
+        ),
+        'value_mae': (
+            total_value_error / examples_seen if examples_seen else float('nan')
+        ),
+        'oom_batches': float(oom_batches),
     }
 
 
@@ -376,7 +500,7 @@ def save_network_source(
         (base_model_dir / 'config.json').read_text(encoding='utf-8')
     )
     config.pop('torch_dtype', None)
-    config['dtype'] = 'bfloat16'
+    config['dtype'] = str(next(network.parameters()).dtype).removeprefix('torch.')
     (model_source_dir / 'config.json').write_text(
         json.dumps(config, indent=2) + '\n',
         encoding='utf-8',
@@ -391,10 +515,14 @@ def save_network_source(
 
 
 def load_latest_checkpoint(run_dir: Path, network: Network) -> int:
-    """Restore the most recent complete SFT epoch."""
+    """Restore the latest complete epoch, or return zero if none exists."""
     checkpoints = sorted((run_dir / 'checkpoints').glob('checkpoint_epoch_*.pt'))
     if not checkpoints:
-        raise FileNotFoundError(f'No SFT checkpoints found under {run_dir}.')
+        print(
+            f'No checkpoints found under {run_dir}; restarting from epoch 1.',
+            flush=True,
+        )
+        return 0
     checkpoint = torch.load(
         checkpoints[-1],
         map_location=network.device,
@@ -548,6 +676,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--log-every', type=positive_int, default=100)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--device', choices=('auto', 'cpu', 'cuda', 'mps'), default='auto')
+    parser.add_argument(
+        '--dtype',
+        choices=tuple(TORCH_DTYPES),
+        default='bfloat16',
+        help='Floating-point precision used for model training.',
+    )
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()
 
