@@ -8,7 +8,12 @@ from typing import Any
 import wandb
 
 from alphaproof.core.actors import run_actor
-from alphaproof.core.config import Config
+from alphaproof.core.config import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_NUM_GAMES,
+    DEFAULT_TRAINING_STEPS,
+    Config,
+)
 from alphaproof.core.game import Game
 from alphaproof.core.network import Network
 from alphaproof.core.paths import RUNS_DIR
@@ -141,8 +146,7 @@ def train_network(
 ) -> None:
     """Train the network from replay and checkpoint parameters."""
     if len(replay_buffer) == 0:
-        print('Warning: replay buffer is empty; skipping network training.')
-        return
+        raise ValueError('Cannot train because no actor game was solved.')
 
     validation_batch = replay_buffer.validation_batch(
         config.validation_batch_size
@@ -294,10 +298,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('run_name', help='Directory name under data/runs.')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--num-simulations', type=positive_int, default=800)
-    parser.add_argument('--num-games', type=positive_int, default=1)
-    parser.add_argument('--batch-size', type=positive_int, default=32)
+    parser.add_argument(
+        '--num-games', type=positive_int, default=DEFAULT_NUM_GAMES
+    )
+    parser.add_argument(
+        '--batch-size', type=positive_int, default=DEFAULT_BATCH_SIZE
+    )
     parser.add_argument('--learning-rate', type=float, default=1e-5)
-    parser.add_argument('--training-steps', type=positive_int, default=1000000)
+    parser.add_argument(
+        '--training-steps', type=positive_int, default=DEFAULT_TRAINING_STEPS
+    )
     parser.add_argument('--value-weight', type=float, default=0.001)
     parser.add_argument('--wandb-name')
     parser.add_argument(

@@ -18,7 +18,7 @@ if __package__ in (None, ''):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from alphaproof.core.actors import run_mcts
-from alphaproof.core.config import DEFAULT_MODEL_PATH, Config
+from alphaproof.core.config import DEFAULT_SFT_RUN_DIR, Config
 from alphaproof.core.environment import Action, Environment, NodeType, State
 from alphaproof.core.game import (
     Game,
@@ -720,10 +720,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         '--run-dir',
         type=Path,
-        default=DEFAULT_MODEL_PATH,
+        default=DEFAULT_SFT_RUN_DIR,
         help=(
             'SFT or RL run containing trained network parameters '
-            f'(default: {DEFAULT_MODEL_PATH}).'
+            f'(default: {DEFAULT_SFT_RUN_DIR}).'
         ),
     )
     parser.add_argument('--num-simulations', type=int, default=800)

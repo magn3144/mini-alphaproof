@@ -9,7 +9,13 @@ from unittest.mock import patch
 
 import torch
 
-from alphaproof.core.config import Config
+from alphaproof.core.config import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_NUM_GAMES,
+    DEFAULT_SFT_RUN_DIR,
+    DEFAULT_TRAINING_STEPS,
+    Config,
+)
 from alphaproof.core.environment import NodeType, Observation
 from alphaproof.core.game import Game, Node, compute_value_target, select_optimal_action
 from alphaproof.training.replay_buffer import ReplayBuffer
@@ -226,6 +232,32 @@ class RunLoggerTest(unittest.TestCase):
 
 
 class TrainingCliTest(unittest.TestCase):
+    def test_defaults_are_sized_for_a_full_training_run(self):
+        with patch.object(sys, 'argv', ['train', 'rl_test']):
+            args = training.parse_args()
+
+        config = training.make_config(args)
+
+        self.assertEqual(args.batch_size, DEFAULT_BATCH_SIZE)
+        self.assertEqual(args.num_games, DEFAULT_NUM_GAMES)
+        self.assertEqual(args.training_steps, DEFAULT_TRAINING_STEPS)
+        self.assertEqual(config.sft_run_dir, DEFAULT_SFT_RUN_DIR)
+
+    def test_empty_replay_fails_training(self):
+        config = Config(1, 1, training_steps=1)
+
+        with self.assertRaisesRegex(
+            ValueError, 'no actor game was solved'
+        ):
+            training.train_network(
+                config,
+                cast(Any, FakeLearner()),
+                cast(Any, FakeStorage()),
+                cast(Any, []),
+                0,
+                cast(Any, FakeTrainingLogger()),
+            )
+
     def test_resume_restores_saved_cli_and_algorithm_config(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

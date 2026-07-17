@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from alphaproof.core.config import DEFAULT_MODEL_PATH
+from alphaproof.core.config import DEFAULT_SFT_RUN_DIR
 from alphaproof.core.network import Network
 from alphaproof.inference.infer import load_network_checkpoint, make_config
 from alphaproof.training.sft import resolve_device
@@ -22,10 +22,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--run-dir',
         type=Path,
-        default=DEFAULT_MODEL_PATH,
+        default=DEFAULT_SFT_RUN_DIR,
         help=(
             'SFT or RL run containing trained network parameters '
-            f'(default: {DEFAULT_MODEL_PATH}).'
+            f'(default: {DEFAULT_SFT_RUN_DIR}).'
         ),
     )
     parser.add_argument('--num-sampled-actions', type=int, default=8)

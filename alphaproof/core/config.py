@@ -11,8 +11,11 @@ from alphaproof.core.paths import (
 from leantree import LeanProject
 
 
-DEFAULT_MODEL_PATH = RUNS_DIR / 'sft_codet5p_220m_v100_32gb'
+DEFAULT_SFT_RUN_DIR = RUNS_DIR / 'sft_codet5p_220m_v100_32gb'
 DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
+DEFAULT_BATCH_SIZE = 8
+DEFAULT_NUM_GAMES = 32
+DEFAULT_TRAINING_STEPS = 10_000
 
 
 class Config:
@@ -23,7 +26,7 @@ class Config:
         num_simulations: int,
         batch_size: int,
         num_actors: int = 1,
-        num_games: int = 1,
+        num_games: int = DEFAULT_NUM_GAMES,
         lr: float = 1e-5,
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject(str(LEAN_PROJECT_DIR)))
@@ -31,10 +34,10 @@ class Config:
         tokenizer_model: str = DEFAULT_TOKENIZER_MODEL,
         dataset_path: str | Path = DEFAULT_THEOREMS_PATH,
         run_id: int | str = 0,
-        sft_run_dir: str | Path | None = None,
+        sft_run_dir: str | Path | None = DEFAULT_SFT_RUN_DIR,
         max_state_length: int = 640,
         max_action_length: int = 128,
-        training_steps: int = int(1000e3),
+        training_steps: int = DEFAULT_TRAINING_STEPS,
         checkpoint_interval: int = int(1e3),
         window_size: int = int(1e6),
         value_weight: float = 0.001,

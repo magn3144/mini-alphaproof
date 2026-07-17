@@ -18,6 +18,7 @@ They might differ from the pseudocde, which is ok.
 
  - Used LeanTree for interacting with Lean 4.
  - SFT dataset (state, action, proof_depth) was generated in a similar fashion as in NanoProof.
+ - SFT code might be similar to NanoProof SFT code.
  - Replay buffer samples uniformly.
  - Computes tactic prior by summing token logprobs. This is used as the prior in PUCT.
  - Value head uses mean pooled encoder output.

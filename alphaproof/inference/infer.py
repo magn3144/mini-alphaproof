@@ -8,7 +8,7 @@ from typing import Any, cast
 import torch
 
 from alphaproof.core.actors import run_mcts
-from alphaproof.core.config import DEFAULT_MODEL_PATH, Config
+from alphaproof.core.config import DEFAULT_SFT_RUN_DIR, Config
 from alphaproof.core.environment import NodeType
 from alphaproof.core.game import Game, Node, extract_proof_script, final_check
 from alphaproof.core.helper import replace_sorry_proof, theorem_for_game
@@ -138,10 +138,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         '--run-dir',
         type=Path,
-        default=DEFAULT_MODEL_PATH,
+        default=DEFAULT_SFT_RUN_DIR,
         help=(
             'SFT or RL run containing trained network parameters '
-            f'(default: {DEFAULT_MODEL_PATH}).'
+            f'(default: {DEFAULT_SFT_RUN_DIR}).'
         ),
     )
     theorem_source = parser.add_mutually_exclusive_group(required=True)
