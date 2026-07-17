@@ -10,7 +10,8 @@ from unittest.mock import patch
 import torch
 
 from alphaproof.core.config import Config
-from alphaproof.core.game import Game
+from alphaproof.core.environment import NodeType, Observation
+from alphaproof.core.game import Game, Node, compute_value_target, select_optimal_action
 from alphaproof.training.replay_buffer import ReplayBuffer
 from alphaproof.training.shared_storage import SharedStorage
 from alphaproof.training import train as training
@@ -132,6 +133,52 @@ class ReplayBufferTest(unittest.TestCase):
             state, action, _ = restored.sample_transition()
             self.assertEqual(tuple(state.shape), (640,))
             self.assertEqual(tuple(action.shape), (128,))
+
+
+class OptimalActionTest(unittest.TestCase):
+    def test_selects_shortest_of_multiple_proven_actions(self):
+        terminal = Node(
+            action='short',
+            observation=Observation([]),
+            prior=0.1,
+            state_id=1,
+            node_type=NodeType.OR,
+            reward=0,
+            is_optimal=True,
+            is_terminal=True,
+        )
+        longer = Node(
+            action='long',
+            observation=Observation([]),
+            prior=0.9,
+            state_id=2,
+            node_type=NodeType.OR,
+            reward=0,
+            is_optimal=True,
+        )
+        longer.children['finish'] = Node(
+            action='finish',
+            observation=Observation([]),
+            prior=1.0,
+            state_id=3,
+            node_type=NodeType.OR,
+            reward=0,
+            is_optimal=True,
+            is_terminal=True,
+        )
+        root = Node(
+            action=None,
+            observation=Observation([]),
+            prior=1.0,
+            state_id=0,
+            node_type=NodeType.OR,
+            reward=0,
+            is_optimal=True,
+        )
+        root.children = {'short': terminal, 'long': longer}
+
+        self.assertEqual(select_optimal_action(root), 'short')
+        self.assertEqual(compute_value_target(root), -1)
 
 
 class SharedStorageTest(unittest.TestCase):
