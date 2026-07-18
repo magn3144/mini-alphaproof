@@ -10,6 +10,17 @@ Disclaimers:
 
 ## Training
 
+Download and cheaply clean the already-formalized NuminaMath-LEAN statements:
+
+```bash
+python -m alphaproof.data.numina_math_lean download
+python -m alphaproof.data.numina_math_lean clean
+```
+
+This writes the raw parquet and cleaned theorem JSONL under `data/dataset/`.
+Lean compatibility is checked lazily when training initializes each theorem;
+statements that do not elaborate are recorded as invalid and not sampled again.
+
 Start a reinforcement-learning run from the default SFT checkpoint:
 
 ```bash

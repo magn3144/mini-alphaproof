@@ -9,6 +9,8 @@
 - Dont make fallbacks. Its better to assume that the input to a function always is in the correct format, and just let the code fail if thats not the case.
 - Write code as simple as possible, without complicated structures. If you can remove more code than you write as you complete a task, thats great.
 - After writing code fix any potential Pylance errors.
+- Scripts that should only be executed once, like downloading a dataset, should be in the scripts folder.
+- Dont write tests. Its not necessary for this project.
 
 
 # Design choices

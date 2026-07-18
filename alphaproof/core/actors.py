@@ -9,6 +9,7 @@ from alphaproof.training.matchmaker import Matchmaker
 from alphaproof.core.network import Network
 from alphaproof.training.replay_buffer import ReplayBuffer
 from alphaproof.training.shared_storage import SharedStorage
+from leantree.repl_adapter.interaction import LeanInteractionException
 
 
 # Each acting job is independent of all others; it takes the latest network
@@ -24,12 +25,16 @@ def run_actor(
 ):
     """Generate solved games from the latest checkpoint."""
     network = Network(config)
-    for _ in range(num_games):
+    games_completed = 0
+    while games_completed < num_games:
         network.params = storage.latest_params()
         game = play_game(config, network, matchmaker)
+        if game is None:
+            continue
         if game.root.is_optimal:
             replay_buffer.save_game(game)
         matchmaker.send_game(game)
+        games_completed += 1
         if on_game is not None:
             on_game(game)
 
@@ -38,11 +43,23 @@ def run_actor(
 # Monte Carlo tree search to find a proof. If one is found, we extract from the
 # search tree the state-tactic-value transitions in the proof, which are added
 # to a replay buffer for training.
-def play_game(config: Config, network: Network, matchmaker: Matchmaker) -> Game:
+def play_game(
+        config: Config,
+        network: Network,
+        matchmaker: Matchmaker,
+) -> Game | None:
     """Run one theorem episode and validate any discovered proof."""
     game = matchmaker.get_start_position()
     with config.environment_ctor() as environment:
-        state = environment.initial_state(game.theorem)
+        try:
+            state = environment.initial_state(game.theorem)
+        except LeanInteractionException as error:
+            matchmaker.reject_theorem(game.theorem)
+            print(
+                f'Rejected theorem that Lean could not initialize: {error}',
+                flush=True,
+            )
+            return None
         if game.disprove:
             state = environment.step(state.id, 'disprove')
         game.root = Node(

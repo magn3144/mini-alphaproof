@@ -22,6 +22,7 @@ class Matchmaker:
         # Disprove is True iff this was an attempt to disprove the theorem.
         # Result is True iff the attempt was successful.
         attempts: list[tuple[bool, bool]] = dataclasses.field(default_factory=list)
+        invalid: bool = False
 
         def update(self, game: Game):
             """Update statistics with the results of a game."""
@@ -29,6 +30,8 @@ class Matchmaker:
 
         def weight(self, config: Config) -> float:
             """Compute weight of this theorem."""
+            if self.invalid:
+                return 0.0
             if not self.attempts:
                 return 1.0
             disproved = any(
@@ -81,10 +84,11 @@ class Matchmaker:
                 theorem = record['theorem']
                 if theorem in theorem_stats:
                     theorem_stats[theorem] = Matchmaker.Stats(
-                            [
+                            attempts=[
                                     (bool(disprove), bool(success))
                                     for disprove, success in record.get('attempts', [])
-                            ]
+                            ],
+                            invalid=bool(record['invalid']),
                     )
         return theorem_stats
 
@@ -98,6 +102,7 @@ class Matchmaker:
                                 [disprove, success]
                                 for disprove, success in stats.attempts
                         ],
+                        'invalid': stats.invalid,
                 }
                 for theorem, stats in self.theorem_stats.items()
         ]
@@ -122,6 +127,8 @@ class Matchmaker:
         weights = [
                 stats.weight(self.config) for stats in self.theorem_stats.values()
         ]
+        if sum(weights) == 0:
+            raise ValueError('No valid theorems remain in the dataset.')
         [(theorem, stats)] = random.choices(
                 list(self.theorem_stats.items()), weights, k=1
         )
@@ -134,4 +141,9 @@ class Matchmaker:
     def send_game(self, game: Game):
         """Send completed game to matchmaker."""
         self.theorem_stats[game.theorem].update(game)
+        self._save_theorem_stats()
+
+    def reject_theorem(self, theorem: Theorem) -> None:
+        """Permanently reject a theorem that Lean cannot initialize."""
+        self.theorem_stats[theorem].invalid = True
         self._save_theorem_stats()
