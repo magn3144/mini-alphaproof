@@ -16,6 +16,7 @@ DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_NUM_GAMES = 32
 DEFAULT_TRAINING_STEPS = 10_000
+DEFAULT_TRAINING_ITERATIONS = 8
 
 
 class Config:
@@ -38,6 +39,7 @@ class Config:
         max_state_length: int = 640,
         max_action_length: int = 128,
         training_steps: int = DEFAULT_TRAINING_STEPS,
+        training_iterations: int = DEFAULT_TRAINING_ITERATIONS,
         checkpoint_interval: int = int(1e3),
         window_size: int = int(1e6),
         value_weight: float = 0.001,
@@ -84,6 +86,7 @@ class Config:
 
         ### Training
         self.training_steps = training_steps
+        self.training_iterations = training_iterations
         self.checkpoint_interval = checkpoint_interval
         self.window_size = window_size
         self.batch_size = batch_size

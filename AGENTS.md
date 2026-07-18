@@ -36,7 +36,7 @@ They might differ from the pseudocde, which is ok.
       step_0001000.pt
       step_0002000.pt
       step_0003000.pt
- - Actors are run sequentially for now, for a specific amount of iterations each.
+ - Actors are run sequentially *for now*, for a specific amount of iterations each.
  - Encoder called again every time a node is expanded.
  - The autoformalizer only generates one lean problem per natural language problem.
  - The dataset used is AI-MO/NuminaMath-1.5. Autoformalization is used in this project to convert problems to Lean.

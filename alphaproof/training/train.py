@@ -11,6 +11,7 @@ from alphaproof.core.actors import run_actor
 from alphaproof.core.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_NUM_GAMES,
+    DEFAULT_TRAINING_ITERATIONS,
     DEFAULT_TRAINING_STEPS,
     Config,
 )
@@ -142,16 +143,19 @@ def train_network(
     storage: SharedStorage,
     replay_buffer: ReplayBuffer,
     start_step: int,
+    num_steps: int,
     logger: RunLogger,
-) -> None:
-    """Train the network from replay and checkpoint parameters."""
+) -> int:
+    """Run one learner phase and return the latest global step."""
     if len(replay_buffer) == 0:
         raise ValueError('Cannot train because no actor game was solved.')
 
     validation_batch = replay_buffer.validation_batch(
         config.validation_batch_size
     )
-    for step in range(start_step + 1, config.training_steps + 1):
+    step = start_step
+    for _ in range(num_steps):
+        step += 1
         train_loss = network.update(replay_buffer.sample_batch())
         validation_loss = None
         if validation_batch and step % config.validation_interval == 0:
@@ -166,8 +170,8 @@ def train_network(
         if step % config.checkpoint_interval == 0:
             storage.save_checkpoint(step, network)
 
-    if config.training_steps % config.checkpoint_interval != 0:
-        storage.save_checkpoint(config.training_steps, network)
+    storage.publish_params(network.params)
+    return step
 
 
 def launch_job(function, *args):
@@ -182,6 +186,12 @@ def alphaproof_train(
     logger: RunLogger,
 ) -> Network:
     """Coordinate resumable actor jobs and learner updates."""
+    total_games = config.num_actors * config.num_games
+    if total_games % config.training_iterations != 0:
+        raise ValueError('Actor games must be divisible by training iterations.')
+    if config.training_steps % config.training_iterations != 0:
+        raise ValueError('Training steps must be divisible by training iterations.')
+
     storage = SharedStorage(run_dir)
     replay_buffer = ReplayBuffer(config, run_dir / REPLAY_FILE)
     matchmaker = Matchmaker(config)
@@ -195,30 +205,46 @@ def alphaproof_train(
         network.load_params(config.initial_params_path)
         start_step = 0
         storage.save_checkpoint(start_step, network)
+        storage.publish_params(network.params)
 
-    total_games = config.num_actors * config.num_games
-    remaining_games = total_games - logger.games_completed
-    while remaining_games > 0:
-        games = min(config.num_games, remaining_games)
-        launch_job(
-            run_actor,
-            config,
-            storage,
-            replay_buffer,
-            matchmaker,
-            games,
-            lambda game: logger.log_game(game, len(replay_buffer)),
-        )
-        remaining_games -= games
+    games_per_iteration = total_games // config.training_iterations
+    steps_per_iteration = config.training_steps // config.training_iterations
+    step = start_step
 
-    train_network(
-        config,
-        network,
-        storage,
-        replay_buffer,
-        start_step,
-        logger,
-    )
+    for iteration in range(config.training_iterations):
+        game_target = (iteration + 1) * games_per_iteration
+        games_to_run = game_target - logger.games_completed
+        if games_to_run > 0:
+            launch_job(
+                run_actor,
+                config,
+                storage,
+                replay_buffer,
+                matchmaker,
+                games_to_run,
+                lambda game: logger.log_game(game, len(replay_buffer)),
+            )
+
+        if len(replay_buffer) == 0:
+            continue
+
+        step_target = (iteration + 1) * steps_per_iteration
+        steps_to_run = step_target - step
+        if steps_to_run > 0:
+            step = train_network(
+                config,
+                network,
+                storage,
+                replay_buffer,
+                step,
+                steps_to_run,
+                logger,
+            )
+
+    if len(replay_buffer) == 0:
+        raise ValueError('Cannot train because no actor game was solved.')
+    if step % config.checkpoint_interval != 0:
+        storage.save_checkpoint(step, network)
     return network
 
 
@@ -251,6 +277,7 @@ def make_config(
         lr=args.learning_rate,
         run_id=args.run_name,
         training_steps=args.training_steps,
+        training_iterations=args.training_iterations,
         value_weight=args.value_weight,
     )
     if saved_config is not None:
@@ -307,6 +334,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--learning-rate', type=float, default=1e-5)
     parser.add_argument(
         '--training-steps', type=positive_int, default=DEFAULT_TRAINING_STEPS
+    )
+    parser.add_argument(
+        '--training-iterations',
+        type=positive_int,
+        default=DEFAULT_TRAINING_ITERATIONS,
     )
     parser.add_argument('--value-weight', type=float, default=0.001)
     parser.add_argument('--wandb-name')

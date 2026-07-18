@@ -21,6 +21,10 @@ class SharedStorage:
             raise ValueError('Shared storage has no network parameters.')
         return self._params
 
+    def publish_params(self, params: Params) -> None:
+        """Publish network parameters for actors."""
+        self._params = params
+
     def save_checkpoint(self, step: int, network: Network) -> Path:
         """Atomically save learner and optimizer state."""
         params = network.params
@@ -35,7 +39,6 @@ class SharedStorage:
             temporary_path,
         )
         temporary_path.replace(checkpoint_path)
-        self._params = params
         return checkpoint_path
 
     def load_latest_checkpoint(self, network: Network) -> int:
@@ -53,5 +56,5 @@ class SharedStorage:
         checkpoint = typing.cast(dict[str, typing.Any], checkpoint)
         network.params = typing.cast(Params, checkpoint['network_params'])
         network.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self._params = network.params
+        self.publish_params(network.params)
         return int(checkpoint['step'])
