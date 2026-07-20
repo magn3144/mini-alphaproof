@@ -1,4 +1,5 @@
 import json
+import math
 import random
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from transformers import AutoTokenizer
 
 from alphaproof.core.config import Config
 from alphaproof.core.game import Game, extract_transitions
+from alphaproof.training.sft import load_examples
 
 
 Transition = tuple[str, str, float]
@@ -20,6 +22,14 @@ class ReplayBuffer:
         """Initialize replay limits and restore existing transitions."""
         self.window_size = config.window_size
         self.batch_size = config.batch_size
+        sft_batch_size = self.batch_size * config.sft_fraction
+        if not math.isclose(sft_batch_size, round(sft_batch_size)):
+            raise ValueError(
+                'batch_size * sft_fraction must be a whole number.'
+            )
+        self.sft_batch_size = round(sft_batch_size)
+        if not 0 < self.sft_batch_size < self.batch_size:
+            raise ValueError('Each batch must contain both SFT and replay data.')
         self.max_state_length = config.max_state_length
         self.max_action_length = config.max_action_length
         if not 0 < config.validation_fraction < 1:
@@ -34,6 +44,19 @@ class ReplayBuffer:
         self.validation_buffer: list[Transition] = []
         self.transition_count = 0
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_model)
+        sft_examples, sft_stats = load_examples(
+            config.sft_dataset_path,
+            self.tokenizer,
+            self.max_state_length,
+            self.max_action_length,
+            None,
+        )
+        self.sft_buffer = [
+            (example.state, example.action, example.value_target)
+            for example in sft_examples
+        ]
+        if not self.sft_buffer:
+            raise ValueError('The SFT dataset contains no usable transitions.')
         self._load()
 
     def save_game(self, game: Game) -> None:
@@ -46,8 +69,21 @@ class ReplayBuffer:
         return len(self.buffer)
 
     def sample_batch(self) -> list[TokenizedTransition]:
-        """Sample a uniformly random training batch."""
-        return [self.sample_transition() for _ in range(self.batch_size)]
+        """Sample the target mix, filling unavailable replay slots with SFT."""
+        replay_batch_size = min(
+            len(self.buffer), self.batch_size - self.sft_batch_size
+        )
+        sft_batch_size = self.batch_size - replay_batch_size
+        batch = [
+            self._tokenize_transition(random.choice(self.sft_buffer))
+            for _ in range(sft_batch_size)
+        ]
+        batch.extend(
+            self._tokenize_transition(transition)
+            for transition in random.sample(self.buffer, replay_batch_size)
+        )
+        random.shuffle(batch)
+        return batch
 
     def sample_transition(self) -> TokenizedTransition:
         """Sample and tokenize one training transition."""

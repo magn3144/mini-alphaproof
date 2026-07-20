@@ -1,6 +1,7 @@
 import argparse
 import gc
 import json
+import math
 import os
 import random
 import uuid
@@ -161,9 +162,6 @@ def train_network(
     logger: RunLogger,
 ) -> int:
     """Run one learner phase and return the latest global step."""
-    if len(replay_buffer) == 0:
-        raise ValueError('Cannot train because no actor game was solved.')
-
     validation_batch = replay_buffer.validation_batch(
         config.validation_batch_size
     )
@@ -259,13 +257,6 @@ def alphaproof_train(
                 lambda game: logger.log_game(game, len(replay_buffer)),
             )
 
-        if len(replay_buffer) == 0:
-            print(
-                f'Iteration {iteration + 1}: no games solved; skipping training.',
-                flush=True,
-            )
-            continue
-
         step_target = (iteration + 1) * steps_per_iteration
         steps_to_run = step_target - step
         if steps_to_run > 0:
@@ -310,6 +301,8 @@ def make_config(
         num_simulations=args.num_simulations,
         batch_size=args.batch_size,
         dataset_path=args.dataset_path,
+        sft_dataset_path=args.sft_dataset_path,
+        sft_fraction=args.sft_fraction,
         disprove_rate=args.disprove_rate,
         num_games=args.num_games,
         seed=args.seed,
@@ -318,11 +311,17 @@ def make_config(
         run_id=args.run_name,
         training_steps=args.training_steps,
         training_iterations=args.training_iterations,
+        checkpoint_interval=args.checkpoint_interval,
         value_weight=args.value_weight,
     )
     if saved_config is not None:
         for name, value in saved_config.items():
-            if name in ('dataset_path', 'sft_run_dir', 'initial_params_path'):
+            if name in (
+                'dataset_path',
+                'sft_dataset_path',
+                'sft_run_dir',
+                'initial_params_path',
+            ):
                 value = Path(value) if value is not None else None
             setattr(config, name, value)
     return config
@@ -371,6 +370,12 @@ def parse_args() -> argparse.Namespace:
         '--dataset-path', type=Path, default=defaults.dataset_path
     )
     parser.add_argument(
+        '--sft-dataset-path', type=Path, default=defaults.sft_dataset_path
+    )
+    parser.add_argument(
+        '--sft-fraction', type=float, default=defaults.sft_fraction
+    )
+    parser.add_argument(
         '--disprove-rate', type=float, default=defaults.mm_disprove_rate
     )
     parser.add_argument(
@@ -390,6 +395,11 @@ def parse_args() -> argparse.Namespace:
         '--training-iterations',
         type=positive_int,
         default=defaults.training_iterations,
+    )
+    parser.add_argument(
+        '--checkpoint-interval',
+        type=positive_int,
+        default=defaults.checkpoint_interval,
     )
     parser.add_argument('--value-weight', type=float, default=defaults.value_weight)
     parser.add_argument('--wandb-name')
@@ -429,6 +439,10 @@ def prepare_run(
         raise FileNotFoundError(
             f'Theorem dataset does not exist: {config.dataset_path}'
         )
+    if not config.sft_dataset_path.is_file():
+        raise FileNotFoundError(
+            f'SFT dataset does not exist: {config.sft_dataset_path}'
+        )
     if not (config.sft_run_dir / 'model_source').is_dir():
         raise FileNotFoundError('SFT model_source directory does not exist.')
     if not (config.sft_run_dir / 'network_params.pt').is_file():
@@ -439,6 +453,15 @@ def prepare_run(
         raise ValueError('--value-weight cannot be negative.')
     if not 0 <= args.disprove_rate <= 1:
         raise ValueError('--disprove-rate must be between zero and one.')
+    if not 0 < args.sft_fraction < 1:
+        raise ValueError('--sft-fraction must be between zero and one.')
+    if not math.isclose(
+        args.batch_size * args.sft_fraction,
+        round(args.batch_size * args.sft_fraction),
+    ):
+        raise ValueError(
+            '--batch-size * --sft-fraction must be a whole number.'
+        )
 
     run_dir.mkdir(parents=True)
     return args, run_dir, None

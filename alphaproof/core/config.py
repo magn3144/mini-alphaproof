@@ -4,6 +4,7 @@ from typing import Callable
 
 from alphaproof.core.environment import Environment
 from alphaproof.core.paths import (
+    DATASET_DIR,
     DEFAULT_THEOREMS_PATH,
     LEAN_PROJECT_DIR,
     MODELS_DIR,
@@ -17,8 +18,8 @@ class Config:
 
     def __init__(
         self,
-        num_simulations: int = 800,
-        batch_size: int = 8,
+        num_simulations: int = 250,
+        batch_size: int = 10,
         num_actors: int = 1,
         num_games: int = 32,
         seed: int | None = None,
@@ -29,6 +30,10 @@ class Config:
         ),
         tokenizer_model: str = str(MODELS_DIR / 'Salesforce--codet5p-220m'),
         dataset_path: str | Path = DEFAULT_THEOREMS_PATH,
+        sft_dataset_path: str | Path = (
+            DATASET_DIR / 'leantree_mathlib_state_action_pairs.train.jsonl'
+        ),
+        sft_fraction: float = 0.1,
         disprove_rate: float = 0.5,
         run_id: int | str = 0,
         sft_run_dir: str | Path | None = (
@@ -54,6 +59,7 @@ class Config:
         ### Acting
         self.environment_ctor = environment_ctor
         self.dataset_path = Path(dataset_path)
+        self.sft_dataset_path = Path(sft_dataset_path)
         self.sft_run_dir = Path(sft_run_dir) if sft_run_dir is not None else None
         if self.sft_run_dir is None:
             self.tokenizer_model = tokenizer_model
@@ -74,8 +80,11 @@ class Config:
         self.pb_c_init = 0.001
         self.value_discount = 0.99
         self.prior_temperature = 200
+        self.c_and = 64
+        self.unvisited_value_penalty = 32
 
         # Other MCTS parameters
+        self.num_sampled_actions = 6
         self.no_legal_actions_value = -40
 
         # Progressive sampling parameters
@@ -91,6 +100,7 @@ class Config:
         self.checkpoint_interval = checkpoint_interval
         self.window_size = window_size
         self.batch_size = batch_size
+        self.sft_fraction = sft_fraction
         self.max_state_length = max_state_length
         self.max_action_length = max_action_length
         self.lr = lr
@@ -112,7 +122,7 @@ class Config:
         self.mm_fully_decided_trust_count = 12
         self.mm_proved_weight = 1e-3
         self.mm_undecided_weight = 0.1
-        self.mm_simulation_failure_multiplier = 2.0
-        self.mm_max_num_simulations = 16 * num_simulations
+        self.mm_simulation_failure_multiplier = 1.17
+        self.mm_max_num_simulations = 16_000
 
         self.run_id = run_id

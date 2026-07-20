@@ -180,14 +180,16 @@ def ucb_score(config: Config, parent: Node, child: Node) -> float:
             + config.pb_c_init
     )
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
+    if parent.node_type == NodeType.AND:
+        pb_c *= config.c_and
 
     # Due to progressive sampling, we normalise priors here.
     prior_score = pb_c * child.prior / parent.prior_sum()
     if child.visit_count > 0:
         value = child.reward + child.value()
-        value_score = config.value_discount ** (- 1 - value)
     else:
-        value_score = 0
+        value = parent.value() - config.unvisited_value_penalty
+    value_score = config.value_discount ** (- 1 - value)
 
     if parent.node_type == NodeType.AND:
         # Invert value score for AND nodes.

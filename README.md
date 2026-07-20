@@ -27,10 +27,10 @@ Start a reinforcement-learning run from the default SFT checkpoint:
 python -m alphaproof.training.train rl_run --wandb-mode online
 ```
 
-The default single-actor profile runs 32 games with 800 simulations each,
-and performs 10,000 learner updates with batch size 8 across eight alternating
-actor-learner iterations. These defaults target roughly a one-day run on a
-CUDA accelerator, but wall time depends on theorem difficulty and hardware.
+The default single-actor profile runs 32 games starting at 250 simulations per
+attempt, with the matchmaker increasing difficult attempts up to 16,000
+simulations. It performs 10,000 learner updates across eight alternating
+actor-learner iterations. Wall time depends on theorem difficulty and hardware.
 Use `--wandb-mode disabled` to train without W&B.
 
 ### Debugging RL training on DTU voltash

@@ -42,7 +42,7 @@ class Network(nn.Module):
             'cuda' if torch.cuda.is_available() else 'cpu'
         )
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_model)
-        self.num_sampled_actions = 8
+        self.num_sampled_actions = config.num_sampled_actions
         self.model = T5ForConditionalGeneration.from_pretrained(
             config.tokenizer_model
         )

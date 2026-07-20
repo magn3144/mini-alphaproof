@@ -28,7 +28,16 @@ RUN_NAME="${RUN_NAME:-rl_codet5p_220m_v100_32gb}"
 nvidia-smi
 uv sync --frozen
 
-set -- -m alphaproof.training.train "${RUN_NAME}" --wandb-mode online
+set -- -m alphaproof.training.train \
+    "${RUN_NAME}" \
+    --num-simulations 250 \
+    --num-games 512 \
+    --batch-size 20 \
+    --learning-rate 1e-5 \
+    --training-steps 10000 \
+    --training-iterations 32 \
+    --checkpoint-interval 250 \
+    --wandb-mode online
 
 if [ -d "data/runs/${RUN_NAME}" ]; then
     echo "Resuming existing RL run ${RUN_NAME}."
