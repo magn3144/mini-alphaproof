@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import os
 import random
@@ -169,7 +170,25 @@ def train_network(
     step = start_step
     for _ in range(num_steps):
         step += 1
-        train_loss = network.update(replay_buffer.sample_batch())
+        train_loss = None
+        oom_message = ''
+        try:
+            train_loss = network.update(replay_buffer.sample_batch())
+        except torch.OutOfMemoryError as error:
+            oom_message = str(error)
+
+        if train_loss is None:
+            network.optimizer.zero_grad(set_to_none=True)
+            gc.collect()
+            if network.device.type == 'cuda':
+                torch.cuda.empty_cache()
+            print(
+                f'WARNING: OOM in learner step {step}; skipped the batch and '
+                f'cleared the CUDA cache. {oom_message}',
+                flush=True,
+            )
+            continue
+
         validation_loss = None
         if validation_batch and step % config.validation_interval == 0:
             validation_loss = network.evaluate(validation_batch)
