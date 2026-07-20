@@ -437,7 +437,10 @@ class AgentSession(BaseSession):
                 self.status = 'cancelled'
             elif self.game.root.is_optimal:
                 self.status = 'verifying'
-                verified = final_check(self.game)
+                verified = final_check(
+                        self.game,
+                        self.config.final_check_timeout,
+                )
                 self.game.root.is_optimal = verified
                 if self.cancelled.is_set():
                     self.status = 'cancelled'
@@ -445,7 +448,7 @@ class AgentSession(BaseSession):
                     self.status = 'solved'
                 else:
                     self.status = 'error'
-                    self.error = 'The generated proof failed final verification.'
+                    self.error = self.game.error
             else:
                 self.status = 'exhausted'
         except SearchCancelled:

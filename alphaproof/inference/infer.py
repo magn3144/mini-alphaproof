@@ -113,7 +113,7 @@ def prove(
         run_mcts(config, game, network, environment)
 
     if game.root.is_optimal:
-        game.root.is_optimal = final_check(game)
+        game.root.is_optimal = final_check(game, config.final_check_timeout)
     return game
 
 

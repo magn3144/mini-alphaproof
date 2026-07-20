@@ -78,6 +78,7 @@ class RunLogger:
             'theorem': game.theorem,
             'disprove': game.disprove,
             'success': success,
+            'error': game.error,
             'episode_reward': reward,
             'rolling_success_rate': rolling_success_rate,
             'rolling_average_reward': rolling_reward,
@@ -104,6 +105,8 @@ class RunLogger:
         )
         if reward is not None:
             message += f', reward {reward}'
+        if game.error is not None:
+            message += f', error: {game.error}'
         print(message, flush=True)
 
     def log_training(

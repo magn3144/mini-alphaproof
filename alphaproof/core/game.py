@@ -69,6 +69,7 @@ class Game:
     def __init__(self, theorem: Theorem, disprove: bool, num_simulations: int):
         """Create an episode around one theorem objective."""
         self.theorem = theorem
+        self.error: str | None = None
         # Whether to try to prove or disprove the theorem.
         self.disprove = disprove
         # Number of simulations to run. Provided by the matchmaker.
@@ -152,15 +153,36 @@ def solution_length(node: Node) -> int:
     raise ValueError(f'Unknown node type: {node.node_type}')
 
 
-def final_check(game: Game) -> bool:
+def final_check(game: Game, timeout: float) -> bool:
     """Checks that the proof found is actually valid."""
+    game.error = None
     theorem = theorem_for_game(game.theorem, game.disprove)
+    proof_lines = extract_proof_script(game.root)
+    finished_proof = replace_sorry_proof(theorem, proof_lines)
+    lean_code = build_lean_check(theorem, proof_lines)
     try:
-        proof_lines = extract_proof_script(game.root)
-        lean_code = build_lean_check(theorem, proof_lines)
-        return run_lean_check(lean_code)
-    except Exception:
-        return False
+        result = run_lean(
+                lean_code,
+                prefix='AlphaProofFinalCheck',
+                timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        game.error = f'Final proof check timed out after {timeout:g} seconds.'
+        output = ''
+    else:
+        if result.returncode == 0:
+            return True
+        game.error = 'Lean rejected the proof found by search.'
+        output = (result.stdout + result.stderr).strip()
+
+    warning = (
+            f'WARNING: {game.error}\n'
+            f'Finished proof:\n{finished_proof}'
+    )
+    if output:
+        warning += f'\nLean output:\n{output}'
+    print(warning, flush=True)
+    return False
 
 
 def extract_proof_script(node: Node, indent: int = 2) -> list[str]:
@@ -210,6 +232,7 @@ def build_lean_check(theorem: Theorem, proof_lines: list[str]) -> str:
 def run_lean(
         lean_code: str,
         prefix: str = 'AlphaProofCheck',
+        timeout: float | None = 30,
 ) -> subprocess.CompletedProcess[str]:
     """Run Lean on generated code and return the completed process."""
     LEAN_PROJECT_DIR.mkdir(exist_ok=True)
@@ -229,7 +252,7 @@ def run_lean(
                 cwd=LEAN_PROJECT_DIR,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 check=False,
         )
     finally:

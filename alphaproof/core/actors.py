@@ -79,7 +79,7 @@ def play_game(
 
     if game.root.is_optimal:
         # Perform final check to ensure the proof is valid.
-        game.root.is_optimal = final_check(game)
+        game.root.is_optimal = final_check(game, config.final_check_timeout)
         if game.root.is_optimal:
             # Compute value targets for the proof.
             compute_value_target(game.root)
