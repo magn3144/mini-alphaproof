@@ -82,6 +82,16 @@ def play_game(
         )
         assert game.root.node_type == NodeType.OR
 
+        if config.debug:
+            print(
+                    f'\n{"=" * 80}\n'
+                    'Game\n'
+                    f'{"=" * 80}\n'
+                    f'Mode: {"disprove" if game.disprove else "prove"}\n'
+                    f'Theorem:\n{game.theorem}',
+                    flush=True,
+            )
+
         # Run Monte Carlo tree search to find a proof.
         run_mcts(config, game, network, environment)
 
@@ -127,7 +137,7 @@ def run_mcts(
                     for action in network_sample_output.action_logprobs
             )
             print(
-                    f'\nRollout {i + 1}/{game.num_simulations}\n'
+                    f'\n--- Rollout {i + 1}/{game.num_simulations} ---\n'
                     f'Leaf state:\n{node.observation}\n'
                     f'Actions sampled at leaf:\n{actions}',
                     flush=True,
