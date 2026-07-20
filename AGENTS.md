@@ -11,6 +11,7 @@
 - After writing code fix any potential Pylance errors.
 - Scripts that should only be executed once, like downloading a dataset, should be in the scripts folder.
 - Dont write tests. Its not necessary for this project.
+- LeanTree is used as a submodule. Dont edit this, just see it as a library.
 
 
 # Design choices
