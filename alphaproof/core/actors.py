@@ -109,6 +109,17 @@ def run_mcts(
 
         assert node.observation is not None
         network_sample_output = network.sample(str(node.observation))
+        if config.debug:
+            actions = '\n'.join(
+                    f'  {action}'
+                    for action in network_sample_output.action_logprobs
+            )
+            print(
+                    f'\nRollout {i + 1}/{game.num_simulations}\n'
+                    f'Leaf state:\n{node.observation}\n'
+                    f'Actions sampled at leaf:\n{actions}',
+                    flush=True,
+            )
         expand_node(node, network_sample_output.action_logprobs,
                                 environment, config.prior_temperature,
                                 config.tactic_timeout)

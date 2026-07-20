@@ -1,3 +1,4 @@
+import secrets
 from pathlib import Path
 from typing import Callable
 
@@ -20,6 +21,8 @@ class Config:
         batch_size: int = 8,
         num_actors: int = 1,
         num_games: int = 32,
+        seed: int | None = None,
+        debug: bool = False,
         lr: float = 1e-5,
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject(str(LEAN_PROJECT_DIR)))
@@ -61,6 +64,8 @@ class Config:
         self.num_actors = num_actors
         self.num_games = num_games
         self.num_simulations = num_simulations
+        self.seed = secrets.randbits(63) if seed is None else seed
+        self.debug = debug
         self.tactic_timeout = 1.0
 
         # UCB formula

@@ -1,3 +1,4 @@
+import random
 import typing
 from pathlib import Path
 
@@ -35,6 +36,13 @@ class SharedStorage:
                 'step': step,
                 'network_params': params,
                 'optimizer_state_dict': network.optimizer.state_dict(),
+                'python_random_state': random.getstate(),
+                'torch_random_state': torch.get_rng_state(),
+                'cuda_random_states': (
+                    torch.cuda.get_rng_state_all()
+                    if torch.cuda.is_available()
+                    else []
+                ),
             },
             temporary_path,
         )
@@ -57,4 +65,10 @@ class SharedStorage:
         network.params = typing.cast(Params, checkpoint['network_params'])
         network.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.publish_params(network.params)
+        random.setstate(checkpoint['python_random_state'])
+        torch.set_rng_state(checkpoint['torch_random_state'].cpu())
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(
+                [state.cpu() for state in checkpoint['cuda_random_states']]
+            )
         return int(checkpoint['step'])

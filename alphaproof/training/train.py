@@ -1,10 +1,13 @@
 import argparse
 import json
+import os
+import random
 import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+import torch
 import wandb
 
 from alphaproof.core.actors import run_actor
@@ -20,6 +23,18 @@ from alphaproof.training.shared_storage import SharedStorage
 CONFIG_FILE = 'config.json'
 RESULTS_FILE = 'results.jsonl'
 REPLAY_FILE = 'replay_buffer.jsonl'
+
+
+def seed_everything(seed: int) -> None:
+    """Configure deterministic random number generation for training."""
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 
 class RunLogger:
@@ -180,6 +195,8 @@ def alphaproof_train(
     logger: RunLogger,
 ) -> Network:
     """Coordinate resumable actor jobs and learner updates."""
+    print(f'Training seed: {config.seed}', flush=True)
+    seed_everything(config.seed)
     total_games = config.num_actors * config.num_games
     if total_games % config.training_iterations != 0:
         raise ValueError('Actor games must be divisible by training iterations.')
@@ -272,6 +289,8 @@ def make_config(
         dataset_path=args.dataset_path,
         disprove_rate=args.disprove_rate,
         num_games=args.num_games,
+        seed=args.seed,
+        debug=args.debug,
         lr=args.learning_rate,
         run_id=args.run_name,
         training_steps=args.training_steps,
@@ -323,6 +342,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train AlphaProof with RL.')
     parser.add_argument('run_name', help='Directory name under data/runs.')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--seed', type=int, default=defaults.seed)
+    parser.add_argument('--debug', action='store_true', default=defaults.debug)
     parser.add_argument(
         '--dataset-path', type=Path, default=defaults.dataset_path
     )
