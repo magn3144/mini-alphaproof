@@ -72,6 +72,7 @@ class Game:
         """Create an episode around one theorem objective."""
         self.theorem = theorem
         self.error: str | None = None
+        self.final_proof: str | None = None
         # Whether to try to prove or disprove the theorem.
         self.disprove = disprove
         # Number of simulations to run. Provided by the matchmaker.
@@ -232,6 +233,7 @@ def final_check(
 ) -> bool:
     """Checks that the proof found is actually valid."""
     game.error = None
+    game.final_proof = None
     theorem = theorem_for_game(game.theorem, game.disprove)
     proof_lines = extract_proof_script(game.root)
     finished_proof = replace_sorry_proof(theorem, proof_lines)
@@ -252,6 +254,7 @@ def final_check(
         game.error = 'Lean rejected the proof found by search.'
         output = str(error)
     else:
+        game.final_proof = finished_proof
         return True
     finally:
         if owns_verifier:

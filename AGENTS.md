@@ -40,7 +40,7 @@ They might differ from the pseudocde, which is ok.
  - Actors are run sequentially *for now*, for a specific amount of iterations each.
  - Encoder called again every time a node is expanded.
  - The autoformalizer only generates one lean problem per natural language problem.
- - The dataset used is AI-MO/NuminaMath-1.5. Autoformalization is used in this project to convert problems to Lean.
+ - The dataset used for training is numina_math_lean_cleaned.jsonl for now.
  - Models used:
   - Data cleaning: Qwen3.6-27B
   - Autoformalization: Goedel-Prover-V2-32B

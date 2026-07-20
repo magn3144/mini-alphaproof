@@ -78,6 +78,7 @@ class RunLogger:
             'theorem': game.theorem,
             'disprove': game.disprove,
             'success': success,
+            'final_proof': game.final_proof,
             'error': game.error,
             'episode_reward': reward,
             'rolling_success_rate': rolling_success_rate,
