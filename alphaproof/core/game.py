@@ -114,14 +114,16 @@ class ProofVerifier:
 
     def verify(self, lean_code: str) -> None:
         """Raise if Lean rejects the provided declaration or times out."""
-        if self.process is None:
-            self._start()
-        assert self.process is not None
-        assert self.checkpoint is not None
-
-        process = self.process
-        checkpoint = self.checkpoint
+        process = None
+        checkpoint = None
         try:
+            if self.process is None:
+                self._start()
+            assert self.process is not None
+            assert self.checkpoint is not None
+
+            process = self.process
+            checkpoint = self.checkpoint
             response = process.send_command(lean_code, timeout=self.timeout)
             if any(
                     'sorryAx' in str(message.get('data', ''))
@@ -134,7 +136,8 @@ class ProofVerifier:
                 f'Final proof-check process failed: {error}'
             ) from error
         finally:
-            if self.process is process:
+            if process is not None and self.process is process:
+                assert checkpoint is not None
                 process.rollback_to(checkpoint)
 
     def _start(self) -> None:

@@ -30,3 +30,6 @@
 
 ## Develop difficulty metric
 - [ ] Read STP paper again
+
+## Implement co-evolutionary training
+- [ ] 
