@@ -33,6 +33,78 @@ actor-learner iterations. These defaults target roughly a one-day run on a
 CUDA accelerator, but wall time depends on theorem difficulty and hardware.
 Use `--wandb-mode disabled` to train without W&B.
 
+### Debugging RL training on DTU voltash
+
+Install the VS Code Python debugger in the project environment once:
+
+```bash
+uv pip install --python .venv/bin/python debugpy gnureadline
+```
+
+Create `.vscode/launch.json`:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to voltash training",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "n-62-20-1",
+        "port": 5678
+      },
+      "justMyCode": true
+    }
+  ]
+}
+```
+
+For each debugging session, open the repository in VS Code through Remote SSH,
+then enter a V100 node and print its hostname:
+
+```bash
+voltash
+cd /work3/s204164/mini-alphaproof
+hostname
+```
+
+Update `host` in `.vscode/launch.json` if the printed hostname differs, then
+start training and wait for the debugger:
+
+```bash
+.venv/bin/python -m debugpy \
+  --listen 0.0.0.0:5678 \
+  --wait-for-client \
+  -m alphaproof.training.train \
+  rl_debug_01 \
+  --dataset-path data/dataset/test_theorems.jsonl \
+  --disprove-rate 0 \
+  --num-games 4 \
+  --num-simulations 16 \
+  --training-iterations 1 \
+  --training-steps 2 \
+  --batch-size 1
+```
+
+Use a new run name for a fresh run. In VS Code, set breakpoints, open **Run and
+Debug** (`Ctrl+Shift+D`), select **Attach to voltash training**, and press `F5`.
+Keep the voltash terminal open throughout the session. The main debugger keys
+are `F10` to step over, `F11` to step into, `Shift+F11` to step out, `F5` to
+continue, and `Shift+F5` to stop.
+
+To continue a stopped run instead of creating a fresh one:
+
+```bash
+.venv/bin/python -m debugpy \
+  --listen 0.0.0.0:5678 \
+  --wait-for-client \
+  -m alphaproof.training.train \
+  rl_debug_01 \
+  --resume
+```
+
 ## Inference
 
 Run inference from either an SFT run or an RL run:

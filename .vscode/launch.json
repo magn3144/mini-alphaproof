@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to voltash training",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "n-62-20-1",
+        "port": 5678
+      },
+      "justMyCode": true
+    }
+  ]
+}
