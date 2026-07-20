@@ -23,8 +23,8 @@ export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 ROWS_TO_CLEAN="${ROWS_TO_CLEAN:-100000}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
-MAX_MODEL_BATCH_SIZE="${MAX_MODEL_BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-64}"
+MAX_MODEL_BATCH_SIZE="${MAX_MODEL_BATCH_SIZE:-64}"
 SEED="${SEED:-0}"
 INPUT_PATH="${INPUT_PATH:-data/dataset/numina_math_1_5_filtered.jsonl}"
 OUTPUT_PATH="${OUTPUT_PATH:-data/dataset/numina_math_1_5_cleaned.jsonl}"
