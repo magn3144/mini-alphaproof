@@ -8,7 +8,7 @@ from typing import Any, cast
 import torch
 
 from alphaproof.core.actors import run_mcts
-from alphaproof.core.config import DEFAULT_SFT_RUN_DIR, Config
+from alphaproof.core.config import Config
 from alphaproof.core.environment import NodeType
 from alphaproof.core.game import Game, Node, extract_proof_script, final_check
 from alphaproof.core.helper import replace_sorry_proof, theorem_for_game
@@ -132,16 +132,17 @@ def read_theorem(args: argparse.Namespace) -> str:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse inference command-line arguments."""
+    default_run_dir = Config().sft_run_dir
     parser = argparse.ArgumentParser(
         description='Search for a verified Lean proof with AlphaProof.'
     )
     parser.add_argument(
         '--run-dir',
         type=Path,
-        default=DEFAULT_SFT_RUN_DIR,
+        default=default_run_dir,
         help=(
             'SFT or RL run containing trained network parameters '
-            f'(default: {DEFAULT_SFT_RUN_DIR}).'
+            f'(default: {default_run_dir}).'
         ),
     )
     theorem_source = parser.add_mutually_exclusive_group(required=True)

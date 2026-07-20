@@ -8,6 +8,10 @@ if TYPE_CHECKING:
 
 
 _PROOF_SEPARATOR = ':= by sorry'
+_DECLARATION_PATTERN = re.compile(
+    r'^[ \t]*(?:(?:theorem|lemma)[ \t]+([^\s(:]+)|example\b)',
+    re.MULTILINE,
+)
 
 
 def theorem_for_game(theorem: str, disprove: bool) -> str:
@@ -38,7 +42,7 @@ def replace_goal_with_false(theorem: str) -> str:
 
 def theorem_name(theorem: str) -> str | None:
     """Extract the declaration name if the theorem is named."""
-    match = re.match(r'\s*(?:theorem|lemma)\s+([^\s(:]+)', theorem)
+    match = _DECLARATION_PATTERN.search(theorem)
     if match is None:
         return None
     return match.group(1)
@@ -67,12 +71,17 @@ def _split_sorry_proof(theorem: str) -> tuple[str, str]:
 
 
 def _find_goal_colon(header: str) -> int:
+    declaration = _DECLARATION_PATTERN.search(header)
+    if declaration is None:
+        raise ValueError('Could not find theorem declaration.')
+
     depth = 0
     goal_colon = -1
     opening = '([{'
     closing = ')]}'
 
-    for index, char in enumerate(header):
+    for index in range(declaration.end(), len(header)):
+        char = header[index]
         if char in opening:
             depth += 1
         elif char in closing:
@@ -86,11 +95,11 @@ def _find_goal_colon(header: str) -> int:
 
 
 def _rename_decl(header: str, suffix: str) -> str:
-    match = re.match(r'(\s*(?:theorem|lemma)\s+)([^\s(:]+)(.*)', header, re.S)
-    if match is None:
+    match = _DECLARATION_PATTERN.search(header)
+    if match is None or match.group(1) is None:
         return header
-    prefix, name, rest = match.groups()
-    return f'{prefix}{name}{suffix}{rest}'
+    name_start, name_end = match.span(1)
+    return f'{header[:name_start]}{match.group(1)}{suffix}{header[name_end:]}'
 
 
 def make_config() -> 'Config':

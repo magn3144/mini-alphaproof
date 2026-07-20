@@ -11,35 +11,30 @@ from alphaproof.core.paths import (
 from leantree import LeanProject
 
 
-DEFAULT_SFT_RUN_DIR = RUNS_DIR / 'sft_codet5p_220m_v100_32gb'
-DEFAULT_TOKENIZER_MODEL = str(MODELS_DIR / 'Salesforce--codet5p-220m')
-DEFAULT_BATCH_SIZE = 8
-DEFAULT_NUM_GAMES = 32
-DEFAULT_TRAINING_STEPS = 10_000
-DEFAULT_TRAINING_ITERATIONS = 8
-
-
 class Config:
     """Hyperparameters and constructors used by the pseudocode pipeline."""
 
     def __init__(
         self,
-        num_simulations: int,
-        batch_size: int,
+        num_simulations: int = 800,
+        batch_size: int = 8,
         num_actors: int = 1,
-        num_games: int = DEFAULT_NUM_GAMES,
+        num_games: int = 32,
         lr: float = 1e-5,
         environment_ctor: Callable[[], Environment] = (
             lambda: Environment(LeanProject(str(LEAN_PROJECT_DIR)))
         ),
-        tokenizer_model: str = DEFAULT_TOKENIZER_MODEL,
+        tokenizer_model: str = str(MODELS_DIR / 'Salesforce--codet5p-220m'),
         dataset_path: str | Path = DEFAULT_THEOREMS_PATH,
+        disprove_rate: float = 0.5,
         run_id: int | str = 0,
-        sft_run_dir: str | Path | None = DEFAULT_SFT_RUN_DIR,
+        sft_run_dir: str | Path | None = (
+            RUNS_DIR / 'sft_codet5p_220m_v100_32gb'
+        ),
         max_state_length: int = 640,
         max_action_length: int = 128,
-        training_steps: int = DEFAULT_TRAINING_STEPS,
-        training_iterations: int = DEFAULT_TRAINING_ITERATIONS,
+        training_steps: int = 10_000,
+        training_iterations: int = 8,
         checkpoint_interval: int = int(1e3),
         window_size: int = int(1e6),
         value_weight: float = 0.001,
@@ -106,7 +101,7 @@ class Config:
         self.wandb_tags = wandb_tags
 
         # Matchmaker
-        self.mm_disprove_rate = 0.5
+        self.mm_disprove_rate = disprove_rate
         self.mm_trust_count = 8
         self.mm_fully_decided_trust_count = 12
         self.mm_proved_weight = 1e-3

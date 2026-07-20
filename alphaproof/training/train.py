@@ -8,13 +8,7 @@ from typing import Any
 import wandb
 
 from alphaproof.core.actors import run_actor
-from alphaproof.core.config import (
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_NUM_GAMES,
-    DEFAULT_TRAINING_ITERATIONS,
-    DEFAULT_TRAINING_STEPS,
-    Config,
-)
+from alphaproof.core.config import Config
 from alphaproof.core.game import Game
 from alphaproof.core.network import Network
 from alphaproof.core.paths import RUNS_DIR
@@ -273,6 +267,8 @@ def make_config(
     config = Config(
         num_simulations=args.num_simulations,
         batch_size=args.batch_size,
+        dataset_path=args.dataset_path,
+        disprove_rate=args.disprove_rate,
         num_games=args.num_games,
         lr=args.learning_rate,
         run_id=args.run_name,
@@ -321,26 +317,35 @@ def positive_int(value: str) -> int:
 
 def parse_args() -> argparse.Namespace:
     """Parse RL training arguments."""
+    defaults = Config()
     parser = argparse.ArgumentParser(description='Train AlphaProof with RL.')
     parser.add_argument('run_name', help='Directory name under data/runs.')
     parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--num-simulations', type=positive_int, default=800)
     parser.add_argument(
-        '--num-games', type=positive_int, default=DEFAULT_NUM_GAMES
+        '--dataset-path', type=Path, default=defaults.dataset_path
     )
     parser.add_argument(
-        '--batch-size', type=positive_int, default=DEFAULT_BATCH_SIZE
+        '--disprove-rate', type=float, default=defaults.mm_disprove_rate
     )
-    parser.add_argument('--learning-rate', type=float, default=1e-5)
     parser.add_argument(
-        '--training-steps', type=positive_int, default=DEFAULT_TRAINING_STEPS
+        '--num-simulations', type=positive_int, default=defaults.num_simulations
+    )
+    parser.add_argument(
+        '--num-games', type=positive_int, default=defaults.num_games
+    )
+    parser.add_argument(
+        '--batch-size', type=positive_int, default=defaults.batch_size
+    )
+    parser.add_argument('--learning-rate', type=float, default=defaults.lr)
+    parser.add_argument(
+        '--training-steps', type=positive_int, default=defaults.training_steps
     )
     parser.add_argument(
         '--training-iterations',
         type=positive_int,
-        default=DEFAULT_TRAINING_ITERATIONS,
+        default=defaults.training_iterations,
     )
-    parser.add_argument('--value-weight', type=float, default=0.001)
+    parser.add_argument('--value-weight', type=float, default=defaults.value_weight)
     parser.add_argument('--wandb-name')
     parser.add_argument(
         '--wandb-mode',
@@ -386,6 +391,8 @@ def prepare_run(
         raise ValueError('--learning-rate must be positive.')
     if args.value_weight < 0:
         raise ValueError('--value-weight cannot be negative.')
+    if not 0 <= args.disprove_rate <= 1:
+        raise ValueError('--disprove-rate must be between zero and one.')
 
     run_dir.mkdir(parents=True)
     return args, run_dir, None

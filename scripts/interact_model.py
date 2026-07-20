@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from alphaproof.core.config import DEFAULT_SFT_RUN_DIR
+from alphaproof.core.config import Config
 from alphaproof.core.network import Network
 from alphaproof.inference.infer import load_network_checkpoint, make_config
 from alphaproof.training.sft import resolve_device
@@ -14,6 +14,7 @@ from alphaproof.training.sft import resolve_device
 
 def parse_args() -> argparse.Namespace:
     """Parse model interaction arguments."""
+    default_run_dir = Config().sft_run_dir
     parser = argparse.ArgumentParser(
         description=(
             'Sample tactics directly from a trained Salesforce CodeT5+ model.'
@@ -22,10 +23,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--run-dir',
         type=Path,
-        default=DEFAULT_SFT_RUN_DIR,
+        default=default_run_dir,
         help=(
             'SFT or RL run containing trained network parameters '
-            f'(default: {DEFAULT_SFT_RUN_DIR}).'
+            f'(default: {default_run_dir}).'
         ),
     )
     parser.add_argument('--num-sampled-actions', type=int, default=8)
