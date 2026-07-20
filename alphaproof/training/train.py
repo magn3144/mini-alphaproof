@@ -220,6 +220,10 @@ def alphaproof_train(
             )
 
         if len(replay_buffer) == 0:
+            print(
+                f'Iteration {iteration + 1}: no games solved; skipping training.',
+                flush=True,
+            )
             continue
 
         step_target = (iteration + 1) * steps_per_iteration
@@ -235,8 +239,6 @@ def alphaproof_train(
                 logger,
             )
 
-    if len(replay_buffer) == 0:
-        raise ValueError('Cannot train because no actor game was solved.')
     if step % config.checkpoint_interval != 0:
         storage.save_checkpoint(step, network)
     return network

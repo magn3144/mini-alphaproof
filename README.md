@@ -40,7 +40,7 @@ Run inference from either an SFT run or an RL run:
 ```bash
 python -m alphaproof.inference.infer \
   --theorem 'theorem alphaproof_example : True := by sorry' \
-  --num-simulations 800
+  --num-simulations 16
 ```
 
 Use `--theorem-file theorem.lean` instead of `--theorem` to read the theorem

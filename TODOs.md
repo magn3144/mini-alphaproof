@@ -16,7 +16,7 @@
 - [X] Check after the existence theorem has been created that it is not trivial.
 - [X] Generate SFT dataset from finished lean proofs.
 - [X] Make formalization pipeline run on two A100 80GB GPUs.
-- [ ] Run formalization pipeline.
+- [X] Run formalization pipeline.
 - [X] Figure out which licences the datasets / models have.
 
 ## Training
@@ -25,3 +25,6 @@
 
 ## Interactive Environment
 - [X] Visualize agent AND-OR search tree.
+
+## Develop difficulty metric
+- [ ] Read STP paper again
