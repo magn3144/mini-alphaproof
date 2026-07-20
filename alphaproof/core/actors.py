@@ -4,7 +4,13 @@ from typing import Dict, List
 
 from alphaproof.core.config import Config
 from alphaproof.core.environment import Action, Environment, NodeType
-from alphaproof.core.game import Game, Node, compute_value_target, final_check
+from alphaproof.core.game import (
+    Game,
+    Node,
+    ProofVerifier,
+    compute_value_target,
+    final_check,
+)
 from alphaproof.training.matchmaker import Matchmaker
 from alphaproof.core.network import Network
 from alphaproof.training.replay_buffer import ReplayBuffer
@@ -26,17 +32,18 @@ def run_actor(
     """Generate solved games from the latest checkpoint."""
     network = Network(config)
     games_completed = 0
-    while games_completed < num_games:
-        network.params = storage.latest_params()
-        game = play_game(config, network, matchmaker)
-        if game is None:
-            continue
-        if game.root.is_optimal:
-            replay_buffer.save_game(game)
-        matchmaker.send_game(game)
-        games_completed += 1
-        if on_game is not None:
-            on_game(game)
+    with ProofVerifier(config.final_check_timeout) as verifier:
+        while games_completed < num_games:
+            network.params = storage.latest_params()
+            game = play_game(config, network, matchmaker, verifier)
+            if game is None:
+                continue
+            if game.root.is_optimal:
+                replay_buffer.save_game(game)
+            matchmaker.send_game(game)
+            games_completed += 1
+            if on_game is not None:
+                on_game(game)
 
 
 # Each game is produced by starting from the initial Lean state, and executing
@@ -47,6 +54,7 @@ def play_game(
         config: Config,
         network: Network,
         matchmaker: Matchmaker,
+        verifier: ProofVerifier,
 ) -> Game | None:
     """Run one theorem episode and validate any discovered proof."""
     game = matchmaker.get_start_position()
@@ -79,7 +87,11 @@ def play_game(
 
     if game.root.is_optimal:
         # Perform final check to ensure the proof is valid.
-        game.root.is_optimal = final_check(game, config.final_check_timeout)
+        game.root.is_optimal = final_check(
+                game,
+                config.final_check_timeout,
+                verifier,
+        )
         if game.root.is_optimal:
             # Compute value targets for the proof.
             compute_value_target(game.root)

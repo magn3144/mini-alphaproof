@@ -1,11 +1,13 @@
-import subprocess
-import tempfile
-from pathlib import Path
-
 from alphaproof.core.environment import Action, NodeType, Observation, Theorem
 from alphaproof.core.helper import replace_sorry_proof, theorem_for_game, theorem_name
 from alphaproof.core.paths import LEAN_PROJECT_DIR
-from leantree import LeanTactic
+from leantree import LeanProject, LeanTactic
+from leantree.repl_adapter.interaction import (
+    LeanEnvironmentCheckpoint,
+    LeanInteractionException,
+    LeanProcess,
+    LeanProcessException,
+)
 
 
 class Node:
@@ -85,6 +87,73 @@ class Game:
         )
 
 
+class ProofCheckProcessError(Exception):
+    """Raised when the persistent Lean verifier process fails."""
+
+
+class ProofVerifier:
+    """Validate reconstructed proofs in an isolated persistent Lean process."""
+
+    def __init__(self, timeout: float):
+        self.timeout = timeout
+        self.process: LeanProcess | None = None
+        self.checkpoint: LeanEnvironmentCheckpoint | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self) -> None:
+        """Close the verifier process if it has been started."""
+        if self.process is not None:
+            self.process.stop_safe()
+            self.process = None
+            self.checkpoint = None
+
+    def verify(self, lean_code: str) -> None:
+        """Raise if Lean rejects the provided declaration or times out."""
+        if self.process is None:
+            self._start()
+        assert self.process is not None
+        assert self.checkpoint is not None
+
+        process = self.process
+        checkpoint = self.checkpoint
+        try:
+            response = process.send_command(lean_code, timeout=self.timeout)
+            if any(
+                    'sorryAx' in str(message.get('data', ''))
+                    for message in response.get('messages', [])
+            ):
+                raise LeanInteractionException('Proof depends on sorryAx.')
+        except LeanProcessException as error:
+            self.close()
+            raise ProofCheckProcessError(
+                f'Final proof-check process failed: {error}'
+            ) from error
+        finally:
+            if self.process is process:
+                process.rollback_to(checkpoint)
+
+    def _start(self) -> None:
+        """Start Lean and load the shared verifier environment once."""
+        process = LeanProject(str(LEAN_PROJECT_DIR)).environment()
+        process.__enter__()
+        try:
+            process.send_command('import Mathlib', timeout=self.timeout)
+            process.send_command(
+                    'set_option warningAsError true',
+                    timeout=self.timeout,
+            )
+        except Exception:
+            process.stop_safe()
+            raise
+        self.process = process
+        self.checkpoint = process.checkpoint()
+
+
 def compute_value_target(node: Node) -> float:
     """Computes the actual value for a node, to be used as a target in learning."""
     if node.is_terminal:
@@ -153,27 +222,37 @@ def solution_length(node: Node) -> int:
     raise ValueError(f'Unknown node type: {node.node_type}')
 
 
-def final_check(game: Game, timeout: float) -> bool:
+def final_check(
+        game: Game,
+        timeout: float,
+        verifier: ProofVerifier | None = None,
+) -> bool:
     """Checks that the proof found is actually valid."""
     game.error = None
     theorem = theorem_for_game(game.theorem, game.disprove)
     proof_lines = extract_proof_script(game.root)
     finished_proof = replace_sorry_proof(theorem, proof_lines)
-    lean_code = build_lean_check(theorem, proof_lines)
+    footer = ''
+    name = theorem_name(finished_proof)
+    if name is not None:
+        footer = f'\n\n#print axioms {name}'
+    lean_code = f'{finished_proof}{footer}'
+    owns_verifier = verifier is None
+    if verifier is None:
+        verifier = ProofVerifier(timeout)
     try:
-        result = run_lean(
-                lean_code,
-                prefix='AlphaProofFinalCheck',
-                timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        game.error = f'Final proof check timed out after {timeout:g} seconds.'
+        verifier.verify(lean_code)
+    except ProofCheckProcessError as error:
+        game.error = str(error)
         output = ''
-    else:
-        if result.returncode == 0:
-            return True
+    except LeanInteractionException as error:
         game.error = 'Lean rejected the proof found by search.'
-        output = (result.stdout + result.stderr).strip()
+        output = str(error)
+    else:
+        return True
+    finally:
+        if owns_verifier:
+            verifier.close()
 
     warning = (
             f'WARNING: {game.error}\n'
@@ -217,54 +296,6 @@ def action_to_tactic(action: Action) -> str:
     if isinstance(action, LeanTactic):
         return action.tactic
     return action
-
-
-def build_lean_check(theorem: Theorem, proof_lines: list[str]) -> str:
-    """Build the Lean file used for final proof checking."""
-    declaration = replace_sorry_proof(theorem, proof_lines)
-    footer = ''
-    name = theorem_name(declaration)
-    if name is not None:
-        footer = f'\n\n#print axioms {name}'
-    return f'import Mathlib\nset_option warningAsError true\n\n{declaration}{footer}\n'
-
-
-def run_lean(
-        lean_code: str,
-        prefix: str = 'AlphaProofCheck',
-        timeout: float | None = 30,
-) -> subprocess.CompletedProcess[str]:
-    """Run Lean on generated code and return the completed process."""
-    LEAN_PROJECT_DIR.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        'w',
-        dir=LEAN_PROJECT_DIR,
-        suffix='.lean',
-        prefix=prefix,
-        delete=False,
-    ) as file:
-        file.write(lean_code)
-        file_path = Path(file.name)
-
-    try:
-        result = subprocess.run(
-                ['lake', 'env', 'lean', file_path.name],
-                cwd=LEAN_PROJECT_DIR,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-        )
-    finally:
-        file_path.unlink(missing_ok=True)
-
-    return result
-
-
-def run_lean_check(lean_code: str) -> bool:
-    """Run Lean on generated code and reject sorry-backed proofs."""
-    result = run_lean(lean_code, prefix='AlphaProofFinalCheck')
-    return result.returncode == 0
 
 
 def _indent(text: str, spaces: int) -> str:

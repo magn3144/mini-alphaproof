@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
 from collections import Counter
+from pathlib import Path
 
 from alphaproof.core.actors import run_mcts
 from alphaproof.core.config import Config
 from alphaproof.core.environment import Environment, NodeType
-from alphaproof.core.game import Game, Node, final_check, run_lean, run_lean_check
+from alphaproof.core.game import Game, Node, final_check
 from alphaproof.formalize.goedel_prover import GoedelProver
 from alphaproof.core.helper import (
         negate_theorem,
@@ -20,6 +23,44 @@ from leantree import LeanProject
 
 
 THEOREM_NAME = 'generated_problem'
+
+
+def run_lean(
+        lean_code: str,
+        prefix: str = 'AlphaProofCheck',
+        timeout: float | None = 30,
+) -> subprocess.CompletedProcess[str]:
+    """Run Lean on generated code and return the completed process."""
+    LEAN_PROJECT_DIR.mkdir(exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        'w',
+        dir=LEAN_PROJECT_DIR,
+        suffix='.lean',
+        prefix=prefix,
+        delete=False,
+    ) as file:
+        file.write(lean_code)
+        file_path = Path(file.name)
+
+    try:
+        result = subprocess.run(
+                ['lake', 'env', 'lean', file_path.name],
+                cwd=LEAN_PROJECT_DIR,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+        )
+    finally:
+        file_path.unlink(missing_ok=True)
+
+    return result
+
+
+def run_lean_check(lean_code: str) -> bool:
+    """Run Lean on generated code and reject sorry-backed proofs."""
+    result = run_lean(lean_code, prefix='AlphaProofFinalCheck')
+    return result.returncode == 0
 
 
 def sample_auto_formalization(
