@@ -7,3 +7,4 @@ models/
 runs/
 *.err
 *.out
+wandb

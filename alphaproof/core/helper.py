@@ -42,28 +42,28 @@ def replace_goal_with_false(theorem: str) -> str:
 
 def theorem_name(theorem: str) -> str | None:
     """Extract the declaration name if the theorem is named."""
-    match = _DECLARATION_PATTERN.search(theorem)
-    if match is None:
+    match = _find_declaration(theorem)
+    if match.group(1) is None:
         return None
     return match.group(1)
 
 
 def replace_sorry_proof(theorem: str, proof_lines: list[str]) -> str:
     """Replace the theorem's single sorry with a generated tactic proof."""
-    if theorem.count('sorry') != 1:
-        raise ValueError('Expected theorem to contain exactly one sorry.')
-    proof = '\n' + '\n'.join(proof_lines)
-    if ' sorry' in theorem:
-        return theorem.replace(' sorry', proof, 1)
-    return theorem.replace('sorry', proof, 1)
+    before_proof, _ = _split_sorry_proof(theorem)
+    proof = '\n'.join(proof_lines)
+    return f'{before_proof} := by\n{proof}'
 
 
 def _split_sorry_proof(theorem: str) -> tuple[str, str]:
-    if theorem.count('sorry') != 1:
-        raise ValueError('Expected theorem to contain exactly one sorry.')
+    theorem = theorem.rstrip()
     separator_index = theorem.rfind(_PROOF_SEPARATOR)
-    if separator_index == -1:
+    if separator_index + len(_PROOF_SEPARATOR) != len(theorem):
         raise ValueError(f'Expected theorem to end with `{_PROOF_SEPARATOR}`.')
+    if theorem.find(_PROOF_SEPARATOR) != separator_index:
+        raise ValueError(
+                f'Expected exactly one `{_PROOF_SEPARATOR}` separator.'
+        )
     return (
             theorem[:separator_index].rstrip(),
             theorem[separator_index:],
@@ -71,12 +71,9 @@ def _split_sorry_proof(theorem: str) -> tuple[str, str]:
 
 
 def _find_goal_colon(header: str) -> int:
-    declaration = _DECLARATION_PATTERN.search(header)
-    if declaration is None:
-        raise ValueError('Could not find theorem declaration.')
+    declaration = _find_declaration(header)
 
     depth = 0
-    goal_colon = -1
     opening = '([{'
     closing = ')]}'
 
@@ -87,19 +84,25 @@ def _find_goal_colon(header: str) -> int:
         elif char in closing:
             depth -= 1
         elif char == ':' and depth == 0:
-            goal_colon = index
+            return index
 
-    if goal_colon == -1:
-        raise ValueError('Could not find theorem goal.')
-    return goal_colon
+    raise ValueError('Could not find theorem goal.')
 
 
 def _rename_decl(header: str, suffix: str) -> str:
-    match = _DECLARATION_PATTERN.search(header)
-    if match is None or match.group(1) is None:
+    match = _find_declaration(header)
+    if match.group(1) is None:
         return header
     name_start, name_end = match.span(1)
     return f'{header[:name_start]}{match.group(1)}{suffix}{header[name_end:]}'
+
+
+def _find_declaration(theorem: str) -> re.Match[str]:
+    """Find the final theorem-like declaration in a dataset record."""
+    declarations = list(_DECLARATION_PATTERN.finditer(theorem))
+    if not declarations:
+        raise ValueError('Could not find theorem declaration.')
+    return declarations[-1]
 
 
 def make_config() -> 'Config':

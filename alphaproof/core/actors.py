@@ -69,7 +69,15 @@ def play_game(
             )
             return None
         if game.disprove:
-            state = environment.step(state.id, 'disprove')
+            try:
+                state = environment.step(state.id, 'disprove')
+            except (LeanInteractionException, ValueError) as error:
+                matchmaker.reject_theorem(game.theorem)
+                print(
+                    f'Rejected theorem that could not be negated: {error}',
+                    flush=True,
+                )
+                return None
         game.root = Node(
                 action=None,
                 observation=state.observation,

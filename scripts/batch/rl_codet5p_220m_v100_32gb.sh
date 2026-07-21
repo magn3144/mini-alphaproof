@@ -7,12 +7,13 @@
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
-#BSUB -o scripts/batch/rl_codet5p_220m_%J.out
-#BSUB -e scripts/batch/rl_codet5p_220m_%J.err
+#BSUB -o scripts/batch/logs/rl_codet5p_220m_%J.out
+#BSUB -e scripts/batch/logs/rl_codet5p_220m_%J.err
 
 set -eu
 
 cd /work3/s204164/mini-alphaproof
+mkdir -p scripts/batch/logs
 
 module purge
 module load python3/3.13.11
