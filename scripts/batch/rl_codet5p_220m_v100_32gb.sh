@@ -32,11 +32,11 @@ uv sync --frozen
 set -- -m alphaproof.training.train \
     "${RUN_NAME}" \
     --num-simulations 250 \
-    --num-games 512 \
+    --num-games 500 \
     --batch-size 20 \
     --learning-rate 1e-5 \
     --training-steps 10000 \
-    --training-iterations 32 \
+    --training-iterations 50 \
     --checkpoint-interval 250 \
     --wandb-mode online
 
