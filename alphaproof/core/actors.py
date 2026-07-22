@@ -4,7 +4,12 @@ from time import perf_counter
 from typing import Dict, List
 
 from alphaproof.core.config import Config
-from alphaproof.core.environment import Action, Environment, NodeType
+from alphaproof.core.environment import (
+    Action,
+    Environment,
+    NodeType,
+    TacticDeadlineExceeded,
+)
 from alphaproof.core.game import (
     Game,
     Node,
@@ -38,9 +43,11 @@ def run_actor(
     with ProofVerifier(config.final_check_timeout) as verifier:
         while games_completed < num_games:
             network.params = storage.latest_params()
+            game_start = perf_counter()
             game = play_game(config, network, matchmaker, verifier)
             if game is None:
                 continue
+            game.timings.total_seconds = perf_counter() - game_start
             if game.root.is_optimal:
                 replay_buffer.save_game(game)
             matchmaker.send_game(game)
@@ -60,7 +67,6 @@ def play_game(
         verifier: ProofVerifier,
 ) -> Game | None:
     """Run one theorem episode and validate any discovered proof."""
-    game_start = perf_counter()
     game = matchmaker.get_start_position()
     setup_start = perf_counter()
     with config.environment_ctor() as environment:
@@ -107,7 +113,11 @@ def play_game(
             )
 
         # Run Monte Carlo tree search to find a proof.
-        run_mcts(config, game, network, environment)
+        try:
+            run_mcts(config, game, network, environment)
+        except TacticDeadlineExceeded as error:
+            game.error = str(error)
+            return game
 
     if game.root.is_optimal:
         # Perform final check to ensure the proof is valid.
@@ -126,7 +136,6 @@ def play_game(
             # Compute value targets for the proof.
             compute_value_target(game.root)
 
-    game.timings.total_seconds = perf_counter() - game_start
     return game
 
 

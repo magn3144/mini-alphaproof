@@ -24,7 +24,7 @@ export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1
 
-RUN_NAME="${RUN_NAME:-rl_codet5p_220m_v100_32gb}"
+RUN_NAME="${RUN_NAME:-rl_codet5p_220m_v100_32gb_02}"
 
 nvidia-smi
 uv sync --frozen

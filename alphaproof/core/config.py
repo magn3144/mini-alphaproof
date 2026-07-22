@@ -73,7 +73,7 @@ class Config:
         self.seed = secrets.randbits(63) if seed is None else seed
         self.debug = debug
         self.tactic_timeout = 1.0
-        self.final_check_timeout = 60.0
+        self.final_check_timeout = 300.0
 
         # UCB formula
         self.pb_c_base = 3200
