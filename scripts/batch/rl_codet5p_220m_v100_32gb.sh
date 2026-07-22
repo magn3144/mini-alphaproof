@@ -31,6 +31,7 @@ uv sync --frozen
 
 set -- -m alphaproof.training.train \
     "${RUN_NAME}" \
+    --dataset-path data/dataset/codex_theorems.jsonl \
     --num-simulations 250 \
     --num-games 500 \
     --batch-size 20 \

@@ -1,13 +1,11 @@
+import asyncio
 import enum
 import typing
-from concurrent.futures import (
-    ThreadPoolExecutor,
-    TimeoutError as FutureTimeoutError,
-)
 from typing import Any, Callable, List, Dict
 
 from alphaproof.core.helper import negate_theorem
 from leantree import LeanProject, LeanTactic, LeanProofState
+from leantree.utils import to_sync
 
 
 # Observations in AlphaProof are the tactic state.
@@ -24,6 +22,39 @@ TACTIC_TIMEOUT_GRACE = 6.0
 
 class TacticDeadlineExceeded(Exception):
     """Raised when a tactic exceeds its Python-side wall-clock deadline."""
+
+
+async def _apply_tactic_with_deadline(
+    branch: Any,
+    action: Action,
+    tactic_timeout: float,
+) -> list[Any]:
+    """Apply a tactic without moving LeanTree to another event loop."""
+    task = asyncio.create_task(
+        branch.apply_tactic_async(
+            action,
+            timeout=round(tactic_timeout * 1000),
+        )
+    )
+    done, _ = await asyncio.wait(
+        {task},
+        timeout=tactic_timeout + TACTIC_TIMEOUT_GRACE,
+    )
+    if task in done:
+        return task.result()
+
+    branch._env.kill_group()
+    try:
+        await task
+    except Exception:
+        pass
+    raise TacticDeadlineExceeded(
+        f'Tactic exceeded its '
+        f'{tactic_timeout + TACTIC_TIMEOUT_GRACE:.1f}s deadline.'
+    )
+
+
+apply_tactic_with_deadline = to_sync(_apply_tactic_with_deadline)
 
 
 class NodeType(enum.Enum):
@@ -58,12 +89,10 @@ class Environment:
         self._next_state_id = -1
         self._branches: dict[int, Any] = {}
         self._theorems: dict[int, Theorem] = {}
-        self._tactic_executor = ThreadPoolExecutor(max_workers=1)
 
     def close(self) -> None:
         """Stop the underlying Lean process."""
         self._env.__exit__(None, None, None)
-        self._tactic_executor.shutdown(wait=False, cancel_futures=True)
 
     def __enter__(self):
         return self
@@ -181,20 +210,13 @@ class Environment:
             raise ValueError('Use focus_goal <i> before applying a tactic.')
 
         try:
-            future = self._tactic_executor.submit(
-                branch.apply_tactic,
+            branches = apply_tactic_with_deadline(
+                branch,
                 action,
-                timeout=round(tactic_timeout * 1000),
+                tactic_timeout,
             )
-            branches = future.result(
-                timeout=tactic_timeout + TACTIC_TIMEOUT_GRACE,
-            )
-        except FutureTimeoutError as exc:
-            self._env.kill_group()
-            raise TacticDeadlineExceeded(
-                f'Tactic {tactic!r} exceeded its '
-                f'{tactic_timeout + TACTIC_TIMEOUT_GRACE:.1f}s deadline.'
-            ) from exc
+        except TacticDeadlineExceeded:
+            raise
         except Exception as exc:
             raise ValueError(f'Invalid tactic {tactic!r}: {exc}') from exc
         return self._state_from_branches(branches)
