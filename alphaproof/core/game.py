@@ -204,36 +204,12 @@ def extract_transitions(node: Node) -> list[tuple[Observation, Action, float]]:
 
 
 def select_optimal_action(node: Node) -> Action:
-    """Select the proven action with the shortest solution."""
+    """Select the first proven action."""
     assert node.node_type == NodeType.OR
-    optimal_children = [
-            (action, child)
-            for action, child in node.children.items()
-            if child.is_optimal
-    ]
-    if not optimal_children:
-        raise ValueError('Node has no proven action.')
-    action, _ = min(
-            optimal_children,
-            key=lambda item: (
-                    solution_length(item[1]),
-                    -item[1].prior,
-                    str(item[0]),
-            ),
-    )
-    return action
-
-
-def solution_length(node: Node) -> int:
-    """Return the number of steps in the shortest proven solution."""
-    if node.is_terminal:
-        return 0
-    if node.node_type == NodeType.OR:
-        action = select_optimal_action(node)
-        return 1 + solution_length(node.children[action])
-    if node.node_type == NodeType.AND:
-        return max(solution_length(child) for child in node.children.values())
-    raise ValueError(f'Unknown node type: {node.node_type}')
+    for action, child in node.children.items():
+        if child.is_optimal:
+            return action
+    raise ValueError('Node has no proven action.')
 
 
 def final_check(

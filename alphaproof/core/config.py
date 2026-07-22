@@ -34,7 +34,7 @@ class Config:
             DATASET_DIR / 'leantree_mathlib_state_action_pairs.train.jsonl'
         ),
         sft_fraction: float = 0.1,
-        disprove_rate: float = 0.5,
+        disprove_rate: float = 0.0,
         run_id: int | str = 0,
         sft_run_dir: str | Path | None = (
             RUNS_DIR / 'sft_codet5p_220m_v100_32gb'

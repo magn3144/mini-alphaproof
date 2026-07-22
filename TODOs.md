@@ -29,7 +29,9 @@
 - [X] Visualize agent AND-OR search tree.
 
 ## Develop difficulty metric
-- [ ] Read STP paper again
+- [X] Read STP paper again
 
 ## Implement co-evolutionary training
-- [ ] 
+- [ ] Adapt STP code to work on GPUs.
+- [ ] Run STP for a few epochs.
+- [ ] Develop AlphaProof difficulty metric and see how it correlates with STP difficulty metric.
