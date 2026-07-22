@@ -5,7 +5,6 @@ import math
 import os
 import random
 import uuid
-from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +13,15 @@ import wandb
 
 from alphaproof.core.actors import run_actor
 from alphaproof.core.config import Config
-from alphaproof.core.game import Game
 from alphaproof.core.network import Network
 from alphaproof.core.paths import RUNS_DIR
 from alphaproof.training.matchmaker import Matchmaker
 from alphaproof.training.replay_buffer import ReplayBuffer
+from alphaproof.training.run_logger import RunLogger
 from alphaproof.training.shared_storage import SharedStorage
 
 
 CONFIG_FILE = 'config.json'
-RESULTS_FILE = 'results.jsonl'
 REPLAY_FILE = 'replay_buffer.jsonl'
 
 
@@ -37,119 +35,6 @@ def seed_everything(seed: int) -> None:
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-
-
-class RunLogger:
-    """Persist game results and isolate all Weights & Biases logging."""
-
-    def __init__(
-        self,
-        run_dir: Path,
-        reward_window: int,
-        wandb_run: Any,
-    ):
-        self.results_path = run_dir / RESULTS_FILE
-        self.results_path.touch(exist_ok=True)
-        self.reward_window = reward_window
-        self.wandb_run = wandb_run
-        successes, rewards = self._load_results()
-        self.games_completed = len(successes)
-        self.recent_successes = deque(
-            successes[-reward_window:], maxlen=reward_window
-        )
-        self.recent_rewards = deque(rewards[-reward_window:], maxlen=reward_window)
-
-    def log_game(self, game: Game, replay_size: int) -> None:
-        """Persist and log one actor result."""
-        success = int(game.root.is_optimal)
-        reward = int(game.root.value_target) if success else None
-        self.recent_successes.append(success)
-        rolling_success_rate = (
-            sum(self.recent_successes) / len(self.recent_successes)
-        )
-        if reward is not None:
-            self.recent_rewards.append(reward)
-        rolling_reward = (
-            sum(self.recent_rewards) / len(self.recent_rewards)
-            if self.recent_rewards
-            else None
-        )
-        self.games_completed += 1
-        record = {
-            'game': self.games_completed,
-            'theorem': game.theorem,
-            'disprove': game.disprove,
-            'success': success,
-            'final_proof': game.final_proof,
-            'error': game.error,
-            'episode_reward': reward,
-            'rolling_success_rate': rolling_success_rate,
-            'rolling_average_reward': rolling_reward,
-            'num_simulations': game.num_simulations,
-            'replay_size': replay_size,
-        }
-        with self.results_path.open('a', encoding='utf-8') as results_file:
-            results_file.write(json.dumps(record) + '\n')
-        metrics = {
-            'actor/game': self.games_completed,
-            'actor/success': success,
-            'actor/rolling_success_rate': rolling_success_rate,
-            'actor/num_simulations': game.num_simulations,
-            'replay/train_size': replay_size,
-        }
-        if reward is not None:
-            metrics['actor/episode_reward'] = reward
-        if rolling_reward is not None:
-            metrics['actor/rolling_average_reward'] = rolling_reward
-        self.wandb_run.log(metrics)
-        message = (
-            f'Game {self.games_completed}: success {success}, '
-            f'rolling success rate {rolling_success_rate:.3f}'
-        )
-        if reward is not None:
-            message += f', reward {reward}'
-        if game.error is not None:
-            message += f', error: {game.error}'
-        print(message, flush=True)
-
-    def log_training(
-        self,
-        step: int,
-        train_loss: float,
-        validation_loss: float | None,
-        replay_size: int,
-    ) -> None:
-        """Log learner metrics."""
-        metrics = {
-            'learner/step': step,
-            'train/loss': train_loss,
-            'replay/train_size': replay_size,
-        }
-        if validation_loss is not None:
-            metrics['validation/replay_loss'] = validation_loss
-        self.wandb_run.log(metrics)
-        message = f'Step {step}: train loss {train_loss:.4f}'
-        if validation_loss is not None:
-            message += f', replay validation loss {validation_loss:.4f}'
-        print(message, flush=True)
-
-    def finish(self) -> None:
-        """Finish the W&B run."""
-        self.wandb_run.finish()
-
-    def _load_results(self) -> tuple[list[int], list[int]]:
-        """Load completed successes and solved rewards when resuming."""
-        if not self.results_path.exists():
-            return [], []
-        successes = []
-        rewards = []
-        with self.results_path.open(encoding='utf-8') as results_file:
-            for line in results_file:
-                record = json.loads(line)
-                successes.append(int(record['success']))
-                if record['episode_reward'] is not None:
-                    rewards.append(int(record['episode_reward']))
-        return successes, rewards
 
 
 def train_network(

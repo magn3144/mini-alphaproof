@@ -33,6 +33,13 @@ simulations. It performs 10,000 learner updates across eight alternating
 actor-learner iterations. Wall time depends on theorem difficulty and hardware.
 Use `--wandb-mode disabled` to train without W&B.
 
+Each RL run writes per-game profiling data to `timings.jsonl`. Summarize total
+game time, node tactic generation, tactic execution, and final verification with:
+
+```bash
+python scripts/summarize_rl_timings.py data/runs/<run_name>
+```
+
 ### Debugging RL training on DTU voltash
 
 Install the VS Code Python debugger in the project environment once:

@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable
+from time import perf_counter
 from typing import Dict, List
 
 from alphaproof.core.config import Config
@@ -8,9 +9,11 @@ from alphaproof.core.game import (
     Game,
     Node,
     ProofVerifier,
+    action_to_tactic,
     compute_value_target,
     final_check,
 )
+from alphaproof.core.timing import GameTimings
 from alphaproof.training.matchmaker import Matchmaker
 from alphaproof.core.network import Network
 from alphaproof.training.replay_buffer import ReplayBuffer
@@ -57,7 +60,9 @@ def play_game(
         verifier: ProofVerifier,
 ) -> Game | None:
     """Run one theorem episode and validate any discovered proof."""
+    game_start = perf_counter()
     game = matchmaker.get_start_position()
+    setup_start = perf_counter()
     with config.environment_ctor() as environment:
         try:
             state = environment.initial_state(game.theorem)
@@ -78,6 +83,7 @@ def play_game(
                     flush=True,
                 )
                 return None
+        game.timings.setup_seconds = perf_counter() - setup_start
         game.root = Node(
                 action=None,
                 observation=state.observation,
@@ -105,15 +111,22 @@ def play_game(
 
     if game.root.is_optimal:
         # Perform final check to ensure the proof is valid.
+        verification_start = perf_counter()
         game.root.is_optimal = final_check(
                 game,
                 config.final_check_timeout,
                 verifier,
         )
+        game.timings.final_verification_seconds = (
+            perf_counter() - verification_start
+        )
+        game.timings.verifier_startup_seconds = verifier.last_startup_seconds
+        game.timings.final_verification_success = game.root.is_optimal
         if game.root.is_optimal:
             # Compute value targets for the proof.
             compute_value_target(game.root)
 
+    game.timings.total_seconds = perf_counter() - game_start
     return game
 
 
@@ -138,7 +151,14 @@ def run_mcts(
             search_path.append(node)
 
         assert node.observation is not None
+        generation_start = perf_counter()
         network_sample_output = network.sample(str(node.observation))
+        game.timings.add_tactic_generation(
+            simulation=i + 1,
+            state_id=node.state_id,
+            seconds=perf_counter() - generation_start,
+            num_tactics=len(network_sample_output.action_logprobs),
+        )
         if config.debug:
             actions = '\n'.join(
                     f'  {action}'
@@ -152,7 +172,7 @@ def run_mcts(
             )
         expand_node(node, network_sample_output.action_logprobs,
                                 environment, config.prior_temperature,
-                                config.tactic_timeout)
+                                config.tactic_timeout, game.timings)
         backpropagate(
                 search_path,
                 network_sample_output.value,
@@ -216,6 +236,7 @@ def expand_node(
         environment: Environment,
         temperature: float,
         tactic_timeout: float,
+        timings: GameTimings,
 ):
     """Expand a node by applying sampled actions in the environment."""
     node.evaluations += 1
@@ -230,11 +251,21 @@ def expand_node(
             continue
         # Immediately apply the actions in the environment.
         try:
-            state = environment.step(
-                node.state_id,
-                action,
-                tactic_timeout=tactic_timeout,
-            )
+            tactic_start = perf_counter()
+            successful = False
+            try:
+                state = environment.step(
+                    node.state_id,
+                    action,
+                    tactic_timeout=tactic_timeout,
+                )
+                successful = True
+            finally:
+                timings.add_tactic_execution(
+                    action_to_tactic(action),
+                    perf_counter() - tactic_start,
+                    successful,
+                )
         except ValueError:
             # Invalid action encountered.
             continue
@@ -263,6 +294,7 @@ def expand_node(
                     environment,
                     temperature,
                     tactic_timeout,
+                    timings,
                 )
 
 

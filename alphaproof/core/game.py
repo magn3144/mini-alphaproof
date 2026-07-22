@@ -1,6 +1,9 @@
+from time import perf_counter
+
 from alphaproof.core.environment import Action, NodeType, Observation, Theorem
 from alphaproof.core.helper import replace_sorry_proof, theorem_for_game, theorem_name
 from alphaproof.core.paths import LEAN_PROJECT_DIR
+from alphaproof.core.timing import GameTimings, is_internal_action
 from leantree import LeanProject, LeanTactic
 from leantree.repl_adapter.interaction import (
     LeanEnvironmentCheckpoint,
@@ -77,6 +80,7 @@ class Game:
         self.disprove = disprove
         # Number of simulations to run. Provided by the matchmaker.
         self.num_simulations = num_simulations
+        self.timings = GameTimings()
         # Dummy node for the type checker.
         self.root = Node(
                 action=None,
@@ -99,6 +103,7 @@ class ProofVerifier:
         self.timeout = timeout
         self.process: LeanProcess | None = None
         self.checkpoint: LeanEnvironmentCheckpoint | None = None
+        self.last_startup_seconds = 0.0
 
     def __enter__(self):
         return self
@@ -117,9 +122,14 @@ class ProofVerifier:
         """Raise if Lean rejects the provided declaration or times out."""
         process = None
         checkpoint = None
+        self.last_startup_seconds = 0.0
         try:
             if self.process is None:
-                self._start()
+                start = perf_counter()
+                try:
+                    self._start()
+                finally:
+                    self.last_startup_seconds = perf_counter() - start
             assert self.process is not None
             assert self.checkpoint is not None
 
@@ -280,7 +290,7 @@ def extract_proof_script(node: Node, indent: int = 2) -> list[str]:
         tactic = action_to_tactic(action)
         child = node.children[action]
 
-        if _is_internal_action(tactic):
+        if is_internal_action(tactic):
             return extract_proof_script(child, indent)
         return [
                 _indent(tactic, indent),
@@ -323,7 +333,3 @@ def _bullet_lines(child_lines: list[str], indent: int) -> list[str]:
             f'{bullet} {first_line.removeprefix(child_indent)}',
             *child_lines[1:],
     ]
-
-
-def _is_internal_action(tactic: str) -> bool:
-    return tactic == 'disprove' or tactic.startswith('focus_goal ')
